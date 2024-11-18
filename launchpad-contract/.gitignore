@@ -1,0 +1,4 @@
+/target
+/Cargo.lock
+contract.wasm.v1
+wallet.export

@@ -1,0 +1,30 @@
+build
+cargo concordium build --schema-embed --schema-out schema.bin --out launchpad.wasm.v1
+
+deploy
+concordium-client --grpc-ip node.testnet.concordium.com module deploy launchpad.wasm.v1 --sender 4DNTjjZiSrRN6Pt2d6x4qm24eHgMZc141Bg4L6WUsSDMTrcJoz --name launchpad-contract-module
+
+init
+concordium-client --grpc-ip node.testnet.concordium.com contract init launchpad-contract-module --parameter-json init.json --contract launchpad --sender 4DNTjjZiSrRN6Pt2d6x4qm24eHgMZc141Bg4L6WUsSDMTrcJoz --energy 10000 --name launchpad-contract
+
+update
+concordium-client --grpc-ip node.testnet.concordium.com contract update launchpad-contract --entrypoint cancel --parameter-json cancel.json --sender 4DNTjjZiSrRN6Pt2d6x4qm24eHgMZc141Bg4L6WUsSDMTrcJoz --energy 10000
+
+create_launchpad
+concordium-client --grpc-ip node.testnet.concordium.com contract update launchpad-contract --entrypoint create_launchpad --parameter-json launchpad.json --sender 4DNTjjZiSrRN6Pt2d6x4qm24eHgMZc141Bg4L6WUsSDMTrcJoz --amount 1.2 --energy 30000
+
+vest
+concordium-client --grpc-ip node.testnet.concordium.com contract update launchpad-contract --entrypoint vest --parameter-json vest.json --sender 4DNTjjZiSrRN6Pt2d6x4qm24eHgMZc141Bg4L6WUsSDMTrcJoz --amount 20 --energy 10000
+
+live pause
+concordium-client --grpc-ip node.testnet.concordium.com contract update launchpad-contract --entrypoint live_pause --parameter-json live_pause.json --sender 4DNTjjZiSrRN6Pt2d6x4qm24eHgMZc141Bg4L6WUsSDMTrcJoz --energy 10000
+
+view
+concordium-client --grpc-ip node.testnet.concordium.com contract invoke launchpad-contract --entrypoint view
+
+Base64 schema
+cargo concordium build --schema-base64-out -
+
+ref: 9769143a0cf908d7039732b14a07f1e1ea3477981a45c5bf25177046c7320b2f
+:5214 // contract index
+ 
