@@ -1,0 +1,11 @@
+{
+    "cis2_contract": {
+      "index": 10579,
+      "subindex": 0
+    },
+    "end": "2025-01-30T18:25:14Z",
+    "minimum_bid": "1000000",
+    "name": "Bike auction",
+    "start": "2025-01-30T18:16:14Z",
+    "token_id": "01"
+}

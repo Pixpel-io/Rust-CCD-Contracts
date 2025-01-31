@@ -1,0 +1,23 @@
+[package]
+name = "nft-auction"
+version = "0.1.0"
+authors = ["Concordium <developers@concordium.com>"]
+edition = "2021"
+license = "MPL-2.0"
+
+[features]
+default = ["std", "bump_alloc"]
+std = ["concordium-std/std", "concordium-cis2/std"]
+bump_alloc = ["concordium-std/bump_alloc"]
+
+[dependencies]
+concordium-std = {version = "*", features = ["std", "bump_alloc"]}
+concordium-cis2 = {version = "*", features = ["std"]}
+
+[dev-dependencies]
+concordium-smart-contract-testing = { version = "*" }
+concordium-std-derive = { version = "*" }
+rand = "0.8"
+
+[lib]
+crate-type=["cdylib", "rlib"]
