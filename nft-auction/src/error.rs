@@ -1,77 +1,129 @@
 use concordium_cis2::{Cis2ClientError, Cis2Error};
-use concordium_std::{
-    CallContractError, LogError, ParseError, SchemaType, Serialize,
-};
+use concordium_std::{CallContractError, LogError, ParseError, SchemaType, Serialize};
 use concordium_std::{UnwrapAbort, *};
 
 /// Errors of this contract.
 #[derive(Debug, PartialEq, Eq, Clone, Reject, Serialize, SchemaType)]
 pub enum Error {
     /// Failed parsing the parameter.
+    ///
+    /// Error code -1
     #[from(ParseError)]
-    ParseParams, //-1
-    // Raised when adding an item; The start time needs to be strictly smaller than the end time.
-    StartEndTimeError, //-2
-    // Raised when adding an item; The end time needs to be in the future.
-    EndTimeError, //-3
+    ParseParams,
+    /// Raised when adding an item; The start time needs to be strictly smaller than the end time.
+    ///
+    /// Error code -2
+    StartEndTimeError,
+    /// Raised when adding an item; The end time needs to be in the future.
+    ///
+    /// Error code -3
+    EndTimeError,
     /// Raised when a contract tries to bid; Only accounts
     /// are allowed to bderive" id.
-    OnlyAccount, //-4
+    ///
+    /// Error code -4
+    OnlyAccount,
     /// Raised when the new bid amount is not greater than the current highest
     /// bid.
-    BidNotGreaterCurrentBid, //-5
+    ///
+    /// Error code -5
+    BidNotGreaterCurrentBid,
     /// Raised when the bid is placed after the auction end time passed.
-    BidTooLate, //-6
+    ///
+    /// Error code -6
+    BidTooLate,
     /// Raised when the bid is placed after the auction has been finalized.
-    AuctionAlreadyFinalized, //-7
+    ///
+    /// Error code -7
+    AuctionAlreadyFinalized,
     /// Raised when the item index cannot be found in the contract.
-    NoItem, //-8
+    ///
+    /// Error code -8
+    NoItem,
     /// Raised when finalizing an auction before the auction end time passed.
-    AuctionStillActive, //-9
+    ///
+    /// Error code -9
+    AuctionStillActive,
     /// Raised when someone else than the cis2 token contract invokes the `bid`
     /// entry point.
-    NotTokenContract, //-10
+    ///
+    /// Error code -10
+    NotTokenContract,
     /// Raised when payment is attempted with a different `token_id` than
     /// specified for an item.
-    WrongTokenID, //-11
+    ///
+    /// Error code -11
+    WrongTokenID,
     /// Raised when the invocation of the cis2 token contract fails.
-    InvokeContractError, //-12
+    ///
+    /// Error code -12
+    InvokeContractError,
     /// Raised when the parsing of the result from the cis2 token contract
     /// fails.
-    ParseResult, //-13
+    ///
+    /// Error code -13
+    ParseResult,
     /// Raised when the response of the cis2 token contract is invalid.
-    InvalidResponse, //-14
+    ///
+    /// Error code -14
+    InvalidResponse,
     /// Raised when the amount of cis2 tokens that was to be transferred is not
     /// available to the sender.
-    AmountTooLarge, //-15
+    ///
+    /// Error code -15
+    AmountTooLarge,
     /// Raised when the owner account of the cis 2 token contract that is being
     /// invoked does not exist. This variant should in principle not happen,
     /// but is here for completeness.
-    MissingAccount, //-16
+    ///
+    /// Error code -16
+    MissingAccount,
     /// Raised when the cis2 token contract that is to be invoked does not
     /// exist.
-    MissingContract, //-17
+    ///
+    /// Error code -17
+    MissingContract,
     /// Raised when the cis2 token contract to be invoked exists, but the entry
     /// point that was named does not.
-    MissingEntrypoint, //-18
-    // Raised when the sending of a message to the V0 contract failed.
-    MessageFailed, //-19
-    // Raised when the cis2 token contract called rejected with the given reason.
-    LogicReject, //-20
-    // Raised when the cis2 token contract execution triggered a runtime error.
-    Trap, //-21
+    ///
+    /// Error code -18
+    MissingEntrypoint,
+    /// Raised when the sending of a message to the V0 contract failed.
+    ///
+    /// Error code -19
+    MessageFailed,
+    /// Raised when the cis2 token contract called rejected with the given reason.
+    ///
+    /// Error code -20
+    LogicReject,
+    /// Raised when the cis2 token contract execution triggered a runtime error.
+    ///
+    /// Error code -21
+    Trap,
     /// Failed logging: Log is full.
-    LogFull, // -22
+    ///
+    /// Error code -22
+    LogFull,
     /// Failed logging: Log is malformed.
-    LogMalformed, // -23
+    ///
+    /// Error code -23
+    LogMalformed,
     /// Failed CCD transfer
-    TransferError, // -24
+    ///
+    /// Error code -24
+    TransferError,
     /// Caller is not the creator of the auction
-    UnAuthorized, // -25
+    ///
+    /// Error code -25
+    UnAuthorized,
     /// Given contract is not CIS2 supported
-    CIS2NotSupported, // -26
+    ///
+    /// Error code -26
+    CIS2NotSupported,
     /// Auction contract is not the operator of CIS2-contract
-    NotOperator, // -27
+    ///
+    /// Error code -27
+    NotOperator,
 }
 
 pub type ContractResult<A> = Result<A, Error>;
