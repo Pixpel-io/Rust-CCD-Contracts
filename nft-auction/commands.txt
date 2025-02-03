@@ -1,3 +1,0 @@
-export ACC=4sjrpri5Yc7UoCo4467bpoAkqNXdLR8LypCje6pUD4zF7eQS83  GRPC_IP=node.testnet.concordium.com  GRPC_PORT=20000
-
-concordium-client contract invoke 10580 --entrypoint view --energy 1000 --grpc-port $GRPC_PORT --grpc-ip $GRPC_IP
