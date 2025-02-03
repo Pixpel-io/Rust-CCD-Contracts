@@ -43,6 +43,9 @@ pub mod params;
 pub mod state;
 pub mod view;
 
+#[cfg(test)]
+mod tests;
+
 /// Contract token ID type. It has to be the `ContractTokenId` from the cis2
 /// token contract.
 pub type ContractTokenId = TokenIdU8;
@@ -104,7 +107,7 @@ fn auction_init(_ctx: &InitContext, state_builder: &mut StateBuilder) -> InitRes
 /// auction (referred to as the creator) is required to specify the start time,
 /// end time, minimum bid, `token_id` associated with the item and `token_amount`
 /// to be sold in the auction along with the contract address `cis2_contract`, that
-/// will be utilized while transfering the token to the winner. At this stage, the 
+/// will be utilized while transfering the token to the winner. At this stage, the
 /// item/auction is assigned the next consecutive index for future reference.
 #[receive(
     contract = "cis2-auction",

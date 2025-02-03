@@ -1,3 +1,5 @@
+// #![cfg(test)]
+use crate::error::Error;
 use concordium_cis2::{
     AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, Receiver,
     TokenAmountU64, TokenIdU8,
@@ -8,11 +10,12 @@ use concordium_smart_contract_testing::{
 };
 use concordium_std::{
     AccountAddress, AccountBalance, Address, Amount, ContractAddress, MetadataUrl,
-    OwnedContractName, OwnedParameter, OwnedReceiveName, SchemaType,
-    Serial, SignatureEd25519,
+    OwnedContractName, OwnedParameter, OwnedReceiveName, SchemaType, Serial, SignatureEd25519,
 };
 use concordium_std_derive::{account_address, signature_ed25519};
-use nft_auction::error;
+
+mod item;
+mod smoke;
 
 /// Alice dummy account for testing
 pub const ALICE: AccountAddress =
@@ -193,14 +196,16 @@ pub fn get_balance(
         .expect("[Error] Unable to deserialize response Balance_Of quary")
 }
 
-pub fn map_invoke_error(err: ContractInvokeError) -> error::Error {
-    if let ContractInvokeErrorKind::ExecutionError { failure_kind } = err.kind {
-        if let InvokeFailure::ContractReject { code: _, data } = failure_kind {
-            data[0].into()
+impl From<ContractInvokeError> for Error {
+    fn from(value: ContractInvokeError) -> Self {
+        if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
+            if let InvokeFailure::ContractReject { code: _, data } = failure_kind {
+                data[0].into()
+            } else {
+                panic!("[Error] Unable to map received invocation error code")
+            }
         } else {
-            panic!("[Error] Unable to map received invocation error code")
+            panic!("[Error] Unable to map ContractInvokeError other than ExecutionError")
         }
-    } else {
-        panic!("[Error] Unable to map ContractInvokeError other than ExecutionError")
     }
 }

@@ -1,10 +1,8 @@
-use common::{initialize_chain_and_auction, map_invoke_error, ALICE, SIGNER};
+use crate::tests::{initialize_chain_and_auction, ALICE, SIGNER};
+use crate::{error, params::AddItemParameter};
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
 use concordium_std::{Address, Amount, OwnedParameter, OwnedReceiveName, Timestamp};
-use nft_auction::{error, params::AddItemParameter};
-
-mod common;
 
 #[test]
 fn add_item_by_contract() {
@@ -38,6 +36,6 @@ fn add_item_by_contract() {
     assert!(update_result.is_err());
     assert_eq!(
         error::Error::OnlyAccount,
-        map_invoke_error(update_result.err().unwrap())
+        update_result.err().unwrap().into()
     )
 }
