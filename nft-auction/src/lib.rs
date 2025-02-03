@@ -1,8 +1,8 @@
 //! # Implementation of an auction smart contract
 //!
-//! The contract is initialized with a cis2 token contract.
-//! Any `token_id` from this cis2 token contract can be used as a payment
-//! token when auctioning an item within this contract.
+//! The contract is initialized with an empty stateof items.
+//! CCD coins are used as payments for the CIS2 token token when auctioning
+//! an item within this contract.
 //!
 //! To initiate a new auction, any account can call the `addItem` entry point.
 //! The account initiating the auction (referred to as the creator) is required
@@ -11,20 +11,13 @@
 //! next consecutive index for future reference.
 //!
 //! Any account can bid for an item.
-//! The `bid` entry point in this contract is not meant to be invoked directly
-//! but rather through the `onCIS2Receive` hook mechanism in the cis2 token
-//! contract. The `bid` entry point can be invoked via a sponsored transaction
-//! mechanism (`permit` entry point) in case it is implemented in the cis2 token
-//! contract. The bidding flow starts with an account invoking either the
-//! `transfer` or the `permit` entry point in the cis2 token contract and
-//! including the `item_index` in the `additionalData` section of the input
-//! parameter. The `transfer` or the `permit` entry point will send some token
-//! amounts to this contract from the bidder. If the token amount exceeds the
-//! current highest bid, the bid is accepted and the previous highest bidder is
-//! refunded its token investment.
+//! The `bid` entry point in this contract can be incokved by anyone using concordium
+//! however this function is 'payable', whoever bids for an item will have to pay the
+//! amount to the contract. If the bidder exceeds the current highest bid amount, the bid
+//! is accepted and the previous highest bidder is refunded its amount in CCD.
 //!
 //! The smart contract keeps track of the current highest bidder as well as
-//! the token amount of the highest bid. The token balances of the smart
+//! the CCD amount of the highest bid. The net balance of the smart
 //! contract represent the sums of all highest bids from the items (that haven't
 //! been finalized). When a new highest bid is accepted by the smart
 //! contract, the smart contract refunds the old highest bidder.
@@ -32,9 +25,9 @@
 //! Bids have to be placed before the auction ends. The participant with the
 //! highest bid (the last accepted bidder) wins the auction.
 //!
-//! After the auction ends for a specific item, any account can finalize the
-//! auction. The creator of that auction receives the highest bid when the
-//! auction is finalized and the item is marked as sold to the highest bidder.
+//! After the auction ends for a specific item, only the creator or the contract owwner can
+//! finalize the auction. The creator of that auction receives the highest bid amount when the
+//! auction is finalized and the item is transfered and marked as sold to the highest bidder.
 //! This can be done only once.
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -93,11 +86,9 @@ impl schema::SchemaType for Event {
     }
 }
 
-/// Init entry point that creates a new auction contract.
-#[init(
-    contract = "cis2-auction",
-    event = "Event"
-)]
+/// Init entry point that creates a new auction contract with an empty State
+/// and sets the counter to 0
+#[init(contract = "cis2-auction", event = "Event")]
 fn auction_init(_ctx: &InitContext, state_builder: &mut StateBuilder) -> InitResult<State> {
     // Creating `State`.
     let state = State {
@@ -110,9 +101,9 @@ fn auction_init(_ctx: &InitContext, state_builder: &mut StateBuilder) -> InitRes
 /// AddItem entry point to add an item to this contract. To initiate a new
 /// auction, any account can call this entry point. The account initiating the
 /// auction (referred to as the creator) is required to specify the start time,
-/// end time, minimum bid, and the `token_id` associated with the item. At this
-/// stage, the item/auction is assigned the next consecutive index for future
-/// reference.
+/// end time, minimum bid, `token_id` associated with the item and 'token_amount'
+/// to be sold in the auction. At this stage, the item/auction is assigned the next
+/// consecutive index for future reference.
 #[receive(
     contract = "cis2-auction",
     name = "addItem",
@@ -159,7 +150,7 @@ fn add_item(
             creator: sender_address,
             token_id: item.token_id,
             cis2_contract: item.cis2_contract,
-            token_amount: item.token_amount
+            token_amount: item.token_amount,
         },
     );
 
@@ -169,17 +160,14 @@ fn add_item(
     Ok(())
 }
 
-/// The `bid` entry point in this contract is not meant to be invoked directly
-/// but rather through the `onCIS2Receive` hook mechanism in the cis2 token
-/// contract. Any account can bid for an item. The `bid` entry point can be
-/// invoked via a sponsored transaction mechanism (`permit` entry point) in case
-/// it is implemented in the cis2 token contract. The bidding flow starts with
-/// an account invoking either the `transfer` or the `permit` entry point in the
-/// cis2 token contract and including the `item_index` in the `additionalData`
-/// section of the input parameter. The `transfer` or the `permit` entry point
-/// will send some token amounts to this contract from the bidder. If the token
-/// amount exceeds the current highest bid, the bid is accepted and the previous
-/// highest bidder is refunded its token investment.
+/// The `bid` entry point in this contract can be invoked by anyone. This 
+/// function is 'payable', means whoever is invoking this must pay the amount
+/// to the contract that it is bidding. Contract will hold the amount, and if
+/// any new highest bidder comes in, the amount will be refunded to the previous
+/// bidder.
+/// 
+/// While invoking this function, the bidder must provide the 'item_index' and 
+/// 'token_id' as the bid parameters.
 #[receive(
     contract = "cis2-auction",
     name = "bid",
@@ -238,9 +226,12 @@ fn auction_bid(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> 
     Ok(())
 }
 
-/// The `finalize` entry point can be called by anyone. It sends the highest bid
-/// in tokens to the creator of the auction if the item is past its auction end
-/// time.
+/// The `finalize` entry point sends the highest bid
+/// amount in CCD to the creator of the auction if the item is past its auction end
+/// time, and transfers the token to the highest bidder.
+/// 
+/// This function is only meant to be invoked by the creator of the auction item, or
+/// the owner of the auction contract
 #[receive(
     contract = "cis2-auction",
     name = "finalize",
@@ -378,8 +369,8 @@ fn contract_serialization_helper(_ctx: &ReceiveContext, _host: &Host<State>) -> 
 }
 
 /// A helper function to make sure that the contract address provided by the
-/// creator of auction at the time of listing the item is whether the CIS2 
-/// compliant or not. 
+/// creator of auction at the time of listing the item is whether the CIS2
+/// compliant or not.
 fn ensure_supports_cis2(
     host: &mut Host<State>,
     cis2_contract: &ContractAddress,
