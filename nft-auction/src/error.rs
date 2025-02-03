@@ -124,6 +124,11 @@ pub enum Error {
     ///
     /// Error code -27
     NotOperator,
+    /// Creator of an auction item is not allowed to bid on its
+    /// own item
+    ///
+    /// Error code -28
+    CreatorCanNotBid,
 }
 
 pub type ContractResult<A> = Result<A, Error>;

@@ -33,7 +33,7 @@ pub struct ItemState {
     /// contract.
     pub cis2_contract: ContractAddress,
     /// Total amount of tokens placed for auction
-    pub token_amount: TokenAmountU64
+    pub token_amount: TokenAmountU64,
 }
 
 /// The state of the smart contract.

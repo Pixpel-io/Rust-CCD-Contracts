@@ -32,7 +32,7 @@ pub struct AddItemParameter {
     /// contract.
     pub cis2_contract: ContractAddress,
     /// Amount of tokens to placed for a bid in auction
-    pub token_amount: TokenAmountU64
+    pub token_amount: TokenAmountU64,
 }
 
 /// The `additionData` that has to be passed to the `bid` entry point.

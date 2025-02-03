@@ -160,13 +160,14 @@ fn add_item(
     Ok(())
 }
 
-/// The `bid` entry point in this contract can be invoked by anyone. This 
+/// The `bid` entry point in this contract can be invoked by anyone. This
 /// function is 'payable', means whoever is invoking this must pay the amount
 /// to the contract that it is bidding. Contract will hold the amount, and if
 /// any new highest bidder comes in, the amount will be refunded to the previous
-/// bidder.
-/// 
-/// While invoking this function, the bidder must provide the 'item_index' and 
+/// bidder. However, it is to be noted that the item owner of an auction can not
+/// bid on its own item.
+///
+/// While invoking this function, the bidder must provide the 'item_index' and
 /// 'token_id' as the bid parameters.
 #[receive(
     contract = "cis2-auction",
@@ -191,6 +192,9 @@ fn auction_bid(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> 
         .items
         .entry(params.item_index)
         .occupied_or(Error::NoItem)?;
+
+    // Ensuring that the auction creator is not bidding on its own item
+    ensure!(bidder_address != item.creator, Error::CreatorCanNotBid);
 
     // Ensure the token_id matches.
     ensure_eq!(item.token_id, params.token_id, Error::WrongTokenID);
@@ -229,7 +233,7 @@ fn auction_bid(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> 
 /// The `finalize` entry point sends the highest bid
 /// amount in CCD to the creator of the auction if the item is past its auction end
 /// time, and transfers the token to the highest bidder.
-/// 
+///
 /// This function is only meant to be invoked by the creator of the auction item, or
 /// the owner of the auction contract
 #[receive(

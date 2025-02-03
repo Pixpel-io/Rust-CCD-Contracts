@@ -14,7 +14,6 @@
 // use sponsored_tx_enabled_auction::params::{self, AddItemParameter};
 // use std::collections::BTreeMap;
 
-
 // /// The test accounts.
 // const ALICE: AccountAddress = account_address!("2xBpaHottqhwFZURMZW4uZduQvpxNDSy46iXMYs9kceNGaPpZX");
 // const ALICE_ADDR: Address = Address::Account(ALICE);
