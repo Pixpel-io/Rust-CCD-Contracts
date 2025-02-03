@@ -12,8 +12,7 @@ mod common;
 
 #[test]
 fn auction_smoke() {
-    let (mut chain, _keypairs_alice, auction_contract_address, token_contract_address) =
-        initialize_chain_and_auction();
+    let (mut chain, _, auction_contract, cis2_contract) = initialize_chain_and_auction();
 
     // Creating params for contract addItem invocation
     let parameter = AddItemParameter {
@@ -22,7 +21,7 @@ fn auction_smoke() {
         end: Timestamp::from_timestamp_millis(5000),
         token_id: TokenIdU8(1),
         minimum_bid: Amount::from_ccd(10),
-        cis2_contract: token_contract_address,
+        cis2_contract,
         token_amount: TokenAmountU64(1),
     };
 
@@ -35,7 +34,7 @@ fn auction_smoke() {
             Energy::from(10000),
             UpdateContractPayload {
                 amount: Amount::from_ccd(0),
-                address: auction_contract_address,
+                address: auction_contract,
                 receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
                 message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
             },
@@ -51,7 +50,7 @@ fn auction_smoke() {
             UpdateContractPayload {
                 amount: Amount::zero(),
                 receive_name: OwnedReceiveName::new_unchecked("cis2-auction.view".to_string()),
-                address: auction_contract_address,
+                address: auction_contract,
                 message: OwnedParameter::empty(),
             },
         )
@@ -75,7 +74,7 @@ fn auction_smoke() {
                     token_id: TokenIdU8(1),
                     creator: ALICE,
                     highest_bid: Amount::from_ccd(10),
-                    cis2_contract: token_contract_address,
+                    cis2_contract: cis2_contract,
                     token_amount: TokenAmountU64(1)
                 }
             )],
