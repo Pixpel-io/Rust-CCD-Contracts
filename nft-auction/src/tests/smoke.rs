@@ -1,16 +1,13 @@
 use crate::tests::{
-    get_balance, initialize_chain_and_auction, mint_token, ALICE, ALICE_ADDR, BOB, BOB_ADDR, SIGNER,
+    get_balance, initialize_chain_and_auction, mint_token, ALICE, ALICE_ADDR, SIGNER,
 };
 
 use crate::{
-    error::Error,
     params::{AddItemParameter, ReturnParamView},
     state::{AuctionState, ItemState},
 };
 use concordium_cis2::{TokenAmountU64, TokenIdU8};
-use concordium_smart_contract_testing::{
-    ContractInvokeErrorKind, Energy, ExecutionError, InvokeFailure, UpdateContractPayload,
-};
+use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
 use concordium_std::{Address, Amount, OwnedParameter, OwnedReceiveName, Timestamp};
 
 #[test]
