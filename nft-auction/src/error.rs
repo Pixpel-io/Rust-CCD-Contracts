@@ -162,8 +162,8 @@ impl From<CallContractError<Cis2Error<Error>>> for Error {
 }
 
 /// Mapping Cis2ClientError<Error> to Error.
-impl From<Cis2ClientError<crate::error::Error>> for crate::error::Error {
-    fn from(e: Cis2ClientError<crate::error::Error>) -> Self {
+impl From<Cis2ClientError<Error>> for Error {
+    fn from(e: Cis2ClientError<Error>) -> Self {
         match e {
             Cis2ClientError::InvokeContractError(err) => err.into(),
             Cis2ClientError::ParseResult => Self::ParseResult,
