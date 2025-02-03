@@ -73,7 +73,7 @@ pub enum Error {
     /// Error code -15
     AmountTooLarge,
     /// Raised when the owner account of the cis 2 token contract that is being
-    /// invoked does not exist. This variant should in principle not happen,
+    /// invoked does not exist. This variant should in principle not happen
     /// but is here for completeness.
     ///
     /// Error code -16
@@ -83,7 +83,7 @@ pub enum Error {
     ///
     /// Error code -17
     MissingContract,
-    /// Raised when the cis2 token contract to be invoked exists, but the entry
+    /// Raised when the cis2 token contract to be invoked exists but the entry
     /// point that was named does not.
     ///
     /// Error code -18
@@ -168,6 +168,42 @@ impl From<Cis2ClientError<crate::error::Error>> for crate::error::Error {
             Cis2ClientError::InvokeContractError(err) => err.into(),
             Cis2ClientError::ParseResult => Self::ParseResult,
             Cis2ClientError::InvalidResponse => Self::InvalidResponse,
+        }
+    }
+}
+
+impl From<u8> for Error {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::ParseParams,
+            1 => Self::StartEndTimeError,
+            2 => Self::EndTimeError,
+            3 => Self::OnlyAccount,
+            4 => Self::BidNotGreaterCurrentBid,
+            5 => Self::BidTooLate,
+            6 => Self::AuctionAlreadyFinalized,
+            7 => Self::NoItem,
+            8 => Self::AuctionStillActive,
+            9 => Self::NotTokenContract,
+            10 => Self::WrongTokenID,
+            11 => Self::InvokeContractError,
+            12 => Self::ParseResult,
+            13 => Self::InvalidResponse,
+            14 => Self::AmountTooLarge,
+            15 => Self::MissingAccount,
+            16 => Self::MissingContract,
+            17 => Self::MissingEntrypoint,
+            18 => Self::MessageFailed,
+            19 => Self::LogicReject,
+            20 => Self::Trap,
+            21 => Self::LogFull,
+            22 => Self::LogMalformed,
+            23 => Self::TransferError,
+            24 => Self::UnAuthorized,
+            25 => Self::CIS2NotSupported,
+            26 => Self::NotOperator,
+            27 => Self::CreatorCanNotBid,
+            _ => unimplemented!(),
         }
     }
 }

@@ -1,12 +1,18 @@
-use concordium_cis2::TokenAmountU64;
+use concordium_cis2::{
+    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, Receiver,
+    TokenAmountU64, TokenIdU8,
+};
 use concordium_smart_contract_testing::{
-    module_load_v1, Account, AccountKeys, Chain, Energy, InitContractPayload, Signer,
+    module_load_v1, Account, AccountKeys, Chain, ContractInvokeError, ContractInvokeErrorKind,
+    Energy, InitContractPayload, InvokeFailure, Signer, UpdateContractPayload,
 };
 use concordium_std::{
-    AccountAddress, AccountBalance, Address, Amount, ContractAddress, OwnedContractName,
-    OwnedParameter, SignatureEd25519,
+    AccountAddress, AccountBalance, Address, Amount, ContractAddress, MetadataUrl,
+    OwnedContractName, OwnedParameter, OwnedReceiveName, SchemaType,
+    Serial, SignatureEd25519,
 };
 use concordium_std_derive::{account_address, signature_ed25519};
+use nft_auction::error;
 
 /// Alice dummy account for testing
 pub const ALICE: AccountAddress =
@@ -111,4 +117,90 @@ pub fn initialize_chain_and_auction() -> (Chain, AccountKeys, ContractAddress, C
         init_auction.contract_address,
         token.contract_address,
     )
+}
+
+/// The parameter for the contract function `mint` which mints/airdrops a number
+/// of tokens to the owner's address.
+#[derive(Serial, SchemaType, Clone)]
+pub struct MintParams {
+    /// Owner of the newly minted tokens.
+    pub to: Receiver,
+    /// The metadata_url of the token.
+    pub metadata_url: MetadataUrl,
+    /// The token_id to mint/create additional tokens.
+    pub token_id: TokenIdU8,
+    /// Additional data that can be sent to the receiving contract.
+    pub data: AdditionalData,
+}
+
+pub fn mint_token(chain: &mut Chain, account: AccountAddress, cis2_contract: ContractAddress) {
+    let params = MintParams {
+        to: Receiver::from_account(ALICE),
+        metadata_url: MetadataUrl {
+            url: "https://some.example/token/0".to_string(),
+            hash: None,
+        },
+        token_id: concordium_cis2::TokenIdU8(1u8),
+        data: AdditionalData::empty(),
+    };
+
+    let _ = chain
+        .contract_update(
+            SIGNER,
+            ALICE,
+            Address::Account(account),
+            Energy::from(10000),
+            UpdateContractPayload {
+                amount: Amount::from_ccd(0),
+                address: cis2_contract,
+                receive_name: OwnedReceiveName::new_unchecked("cis2_multi.mint".to_string()),
+                message: OwnedParameter::from_serial(&params)
+                    .expect("[Error] Serialization Failed"),
+            },
+        )
+        .expect("[Error] Mint Failed");
+}
+
+/// Get the `TokenIdU8(1)` balances for Alice and the auction contract.
+pub fn get_balance(
+    chain: &Chain,
+    account: AccountAddress,
+    cis2_contract: ContractAddress,
+) -> BalanceOfQueryResponse<TokenAmountU64> {
+    let balance_of_params: BalanceOfQueryParams<_> = BalanceOfQueryParams {
+        queries: vec![BalanceOfQuery {
+            token_id: TokenIdU8(1),
+            address: ALICE_ADDR,
+        }],
+    };
+
+    let invoke = chain
+        .contract_invoke(
+            account,
+            Address::Account(account),
+            Energy::from(10000),
+            UpdateContractPayload {
+                amount: Amount::zero(),
+                receive_name: OwnedReceiveName::new_unchecked("cis2_multi.balanceOf".to_string()),
+                address: cis2_contract,
+                message: OwnedParameter::from_serial(&balance_of_params).expect("BalanceOf params"),
+            },
+        )
+        .expect("[Error] Balance_Of query Invocation failed");
+
+    invoke
+        .parse_return_value()
+        .expect("[Error] Unable to deserialize response Balance_Of quary")
+}
+
+pub fn map_invoke_error(err: ContractInvokeError) -> error::Error {
+    if let ContractInvokeErrorKind::ExecutionError { failure_kind } = err.kind {
+        if let InvokeFailure::ContractReject { code: _, data } = failure_kind {
+            data[0].into()
+        } else {
+            panic!("[Error] Unable to map received invocation error code")
+        }
+    } else {
+        panic!("[Error] Unable to map ContractInvokeError other than ExecutionError")
+    }
 }

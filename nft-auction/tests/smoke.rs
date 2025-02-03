@@ -1,9 +1,15 @@
-use common::{initialize_chain_and_auction, ALICE, ALICE_ADDR, SIGNER};
+use common::{
+    get_balance, initialize_chain_and_auction, map_invoke_error, mint_token, ALICE, ALICE_ADDR,
+    BOB, BOB_ADDR, SIGNER,
+};
 
 use concordium_cis2::{TokenAmountU64, TokenIdU8};
-use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
+use concordium_smart_contract_testing::{
+    ContractInvokeErrorKind, Energy, ExecutionError, InvokeFailure, UpdateContractPayload,
+};
 use concordium_std::{Address, Amount, OwnedParameter, OwnedReceiveName, Timestamp};
 use nft_auction::{
+    error::Error,
     params::{AddItemParameter, ReturnParamView},
     state::{AuctionState, ItemState},
 };
@@ -81,4 +87,15 @@ fn auction_smoke() {
             counter: 1,
         }
     );
+}
+
+#[test]
+fn airdrop_mint_smoke() {
+    let (mut chain, _, _, cis2_contract) = initialize_chain_and_auction();
+
+    mint_token(&mut chain, ALICE, cis2_contract);
+
+    let balance_of_alice = get_balance(&chain, ALICE, cis2_contract);
+
+    assert_eq!(balance_of_alice.0, [TokenAmountU64(100)])
 }
