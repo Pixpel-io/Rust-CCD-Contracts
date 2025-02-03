@@ -161,14 +161,14 @@ fn add_item(
 }
 
 /// The `bid` entry point in this contract can be invoked by anyone. This
-/// function is 'payable', means whoever is invoking this must pay the amount
+/// function is `payable`, means whoever is invoking this must pay the amount
 /// to the contract that it is bidding. Contract will hold the amount, and if
 /// any new highest bidder comes in, the amount will be refunded to the previous
 /// bidder. However, it is to be noted that the item owner of an auction can not
 /// bid on its own item.
 ///
-/// While invoking this function, the bidder must provide the 'item_index' and
-/// 'token_id' as the bid parameters.
+/// While invoking this function, the bidder must provide the `item_index` and
+/// `token_id` as the bid parameters.
 #[receive(
     contract = "cis2-auction",
     name = "bid",
@@ -318,6 +318,70 @@ fn auction_finalize(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRes
                 data: AdditionalData::empty(),
             },
         )?;
+    }
+
+    Ok(())
+}
+
+/// The `cancel` entrypoint use to cancel any active auction for an item.
+/// It can only be invoke by creator of the auction or the owner of the 
+/// auction contract itself.
+/// 
+/// When it is invoked, the bid amount is then refunded to the bidder and
+/// action is made inactive by setting the `AuctionState::Canceled`.
+/// 
+/// While invoking this entrypoint, invoker must provide a valid item index
+/// for the listed item in the auction
+#[receive(
+    contract = "cis2-auction",
+    name = "cancel",
+    mutable,
+    parameter = "u16",
+    error = "Error"
+)]
+fn auction_cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
+    // Ensure the sender is the cis2 token contract
+    let canceler = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(Error::OnlyAccount),
+    };
+
+    // Getting input parameters.
+    let item_index: u16 = ctx.parameter_cursor().get()?;
+
+    let mut item = host
+        .state_mut()
+        .items
+        .entry(item_index)
+        .occupied_or(Error::NoItem)?;
+
+    // Fetching the amount related to the highest bidder to be
+    // refunded
+    let bidder_amount = item.highest_bid;
+    
+    // Ensure that the canceler is the creator of the auction or
+    // the owner of the contract itself
+    ensure!(
+        canceler == item.creator || canceler == ctx.owner(),
+        Error::UnAuthorized
+    );
+
+    // Ensure the auction has not been finalized yet.
+    ensure_eq!(
+        item.auction_state,
+        AuctionState::NotSoldYet,
+        Error::AuctionAlreadyFinalized
+    );
+
+    // Updating the auction state
+    item.auction_state = AuctionState::Canceled;
+
+    // Refunding the amount in ccd if there is any highest bidder
+    if let Some(previous_bidder) = item.highest_bidder {
+        drop(item);
+
+        let transfer_result = host.invoke_transfer(&previous_bidder, bidder_amount);
+        ensure!(transfer_result.is_ok(), Error::TransferError);
     }
 
     Ok(())

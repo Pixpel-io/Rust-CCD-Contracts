@@ -61,4 +61,7 @@ pub enum AuctionState {
     /// The auction has been finalized and the item has been sold to the
     /// winning `AccountAddress`.
     Sold(AccountAddress),
+    /// Auction has been canceled by either the creator or contract owner
+    /// without finalizing
+    Canceled
 }
