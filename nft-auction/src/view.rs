@@ -6,7 +6,8 @@ use crate::{
     state::{AuctionState, ItemState, State},
 };
 
-/// View function that returns the content of the state.
+/// This `view` entrypoint, when invoked will return the state of the whole contract
+/// containing all the items listed irrespective of the `AuctionState`
 #[receive(
     contract = "cis2-auction",
     name = "view",
@@ -23,7 +24,10 @@ fn view(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<ReturnParam
     })
 }
 
-/// ViewItemState function that returns the state of a specific item.
+/// This `viewItemState` entrypoint, when invoked will return the state of a specific
+/// item.
+///
+/// Invoker must provide the related `item_index` as the input paramter
 #[receive(
     contract = "cis2-auction",
     name = "viewItemState",
@@ -43,7 +47,10 @@ fn view_item_state(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<I
     Ok(item)
 }
 
-/// ViewItemState function that returns the state of a specific item.
+/// This `viewActive` entrypoint, when invoked will return the state of the contract
+/// containing only the items listed with respect to `AuctionState::NotSoldYet`.
+///
+/// In other words, it returns the active auctions list in the contract
 #[receive(
     contract = "cis2-auction",
     name = "viewActive",
@@ -61,7 +68,10 @@ fn view_active(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<Retu
     })
 }
 
-/// ViewItemState function that returns the state of a specific item.
+/// This `viewCanceled` entrypoint, when invoked will return the state of the contract
+/// containing only the items listed with respect to `AuctionState::Canceled`.
+///
+/// In other words, it returns the canceled auctions list in the contract
 #[receive(
     contract = "cis2-auction",
     name = "viewCanceled",
@@ -79,7 +89,10 @@ fn view_canceled(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<Re
     })
 }
 
-/// ViewItemState function that returns the state of a specific item.
+/// This `viewFinalized` entrypoint, when invoked will return the state of the contract
+/// containing only the items listed with respect to `AuctionState::Sold(_)`.
+///
+/// In other words, it returns the finalized auctions list in the contract
 #[receive(
     contract = "cis2-auction",
     name = "viewFinalized",
@@ -106,6 +119,10 @@ fn view_finalized(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<R
     })
 }
 
+/// This is the helper function to get the list of the items witch matches the
+/// `ActionState`
+///
+/// Returns the list of items with their corresponding indexes `Vec<(u16, ItemState)>`
 fn get_items(host: &Host<State>, state: AuctionState) -> Vec<(u16, ItemState)> {
     let inner = host
         .state()
