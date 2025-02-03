@@ -57,7 +57,6 @@
 use concordium_cis2::*;
 use concordium_std::{collections::BTreeMap, *};
 
-use crate::cis2_client::*;
 use crate::errors::*;
 use crate::params::*;
 use crate::response::*;
@@ -69,7 +68,7 @@ fn get_token_reserve<S: HasStateApi>(
     host: &mut impl HasHost<State, StateApiType = S>,
     token_info: &TokenInfo,
 ) -> ContractResult<ContractTokenAmount> {
-    Cis2Client::get_balance(
+    crate::cis2_client::Cis2Client::get_balance(
         host,
         token_info.id.clone(),
         &token_info.address,
@@ -192,7 +191,7 @@ fn create_launchpad<S: HasStateApi>(
         cliff_duration: new_launchpad_param.cliff_duration,
     };
 
-    Cis2Client::transfer(
+    crate::cis2_client::Cis2Client::transfer(
         host,
         new_launchpad_param.token_param.id.clone(),
         new_launchpad_param.token_param.address,
@@ -698,7 +697,7 @@ fn cancel<S: HasStateApi>(
 
         let token_reserve = get_token_reserve(ctx, host, &params.token.clone())?;
 
-        Cis2Client::transfer(
+        crate::cis2_client::Cis2Client::transfer(
             host,
             params.token.id.clone(),
             params.token.address,
@@ -775,7 +774,7 @@ fn send_ccd_to_dev<S: HasStateApi>(
 
         // check if the hard cap didn't reach so remaining cis2 must return to developer wallet
         if matched.hard_cap < matched.invest_amount {
-            Cis2Client::transfer(
+            crate::cis2_client::Cis2Client::transfer(
                 host,
                 params.token.id.clone(),
                 params.token.address,
@@ -916,7 +915,7 @@ fn claim<S: HasStateApi>(
                         * release_detials_matched.per_cycle_release
                         / 100;
 
-                    Cis2Client::transfer(
+                    crate::cis2_client::Cis2Client::transfer(
                         host,
                         params.id.clone(),
                         params.address,
