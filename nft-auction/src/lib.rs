@@ -324,12 +324,12 @@ fn auction_finalize(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRes
 }
 
 /// The `cancel` entrypoint use to cancel any active auction for an item.
-/// It can only be invoke by creator of the auction or the owner of the 
+/// It can only be invoke by creator of the auction or the owner of the
 /// auction contract itself.
-/// 
+///
 /// When it is invoked, the bid amount is then refunded to the bidder and
 /// action is made inactive by setting the `AuctionState::Canceled`.
-/// 
+///
 /// While invoking this entrypoint, invoker must provide a valid item index
 /// for the listed item in the auction
 #[receive(
@@ -358,7 +358,7 @@ fn auction_cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResul
     // Fetching the amount related to the highest bidder to be
     // refunded
     let bidder_amount = item.highest_bid;
-    
+
     // Ensure that the canceler is the creator of the auction or
     // the owner of the contract itself
     ensure!(

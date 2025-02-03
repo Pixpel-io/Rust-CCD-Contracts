@@ -63,5 +63,5 @@ pub enum AuctionState {
     Sold(AccountAddress),
     /// Auction has been canceled by either the creator or contract owner
     /// without finalizing
-    Canceled
+    Canceled,
 }
