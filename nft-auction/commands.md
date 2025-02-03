@@ -40,7 +40,7 @@ concordium-client contract update auction-instance --sender $ACC --entrypoint bi
 To finalize a contract
 
 ```bash
-concordium-client contract update auction-instance --sender $ACC --entrypoint finalize --json-params ./schema-artifacts/finalize.json --energy 1500 --grpc-port $GRPC_PORT --grpc-ip $GRPC_IP
+concordium-client contract update auction-instance --sender $ACC --entrypoint finalize --json-params ./schema-artifacts/item_index.json --energy 1500 --grpc-port $GRPC_PORT --grpc-ip $GRPC_IP
 ```
 
 To view the current state of the contract instance
@@ -52,5 +52,5 @@ concordium-client contract ivoke auction-instance --entrypoint view --energy 150
 To view a specefic item state listed for the auction in contract
 
 ```bash
-concordium-client contract invoke auction-instance --entrypoint viewItemState --json-params ./schema-artifacts/viewItemState.json --energy 1500 --grpc-port $GRPC_PORT --grpc-ip $GRPC_IP
+concordium-client contract invoke auction-instance --entrypoint viewItemState --json-params ./schema-artifacts/item_index.json --energy 1500 --grpc-port $GRPC_PORT --grpc-ip $GRPC_IP
 ```
