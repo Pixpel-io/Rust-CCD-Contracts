@@ -14,8 +14,8 @@ std = ["concordium-std/std", "concordium-cis2/std"]
 wee_alloc = ["concordium-std/wee_alloc"]
 
 [dependencies]
-concordium-std = {version = "6.2", default-features = false}
-concordium-cis2 = "3.0.0"
+concordium-std = {version = "*", default-features = false}
+concordium-cis2 = "*"
 chrono = "0.4.26"
 
 
@@ -24,7 +24,3 @@ concordium-smart-contract-testing = "1.0"
 
 [lib]
 crate-type=["cdylib", "rlib"]
-
-[profile.release]
-opt-level = "s"
-codegen-units = 1
