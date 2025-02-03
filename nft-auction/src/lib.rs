@@ -101,9 +101,10 @@ fn auction_init(_ctx: &InitContext, state_builder: &mut StateBuilder) -> InitRes
 /// AddItem entry point to add an item to this contract. To initiate a new
 /// auction, any account can call this entry point. The account initiating the
 /// auction (referred to as the creator) is required to specify the start time,
-/// end time, minimum bid, `token_id` associated with the item and 'token_amount'
-/// to be sold in the auction. At this stage, the item/auction is assigned the next
-/// consecutive index for future reference.
+/// end time, minimum bid, `token_id` associated with the item and `token_amount`
+/// to be sold in the auction along with the contract address `cis2_contract`, that
+/// will be utilized while transfering the token to the winner. At this stage, the 
+/// item/auction is assigned the next consecutive index for future reference.
 #[receive(
     contract = "cis2-auction",
     name = "addItem",
