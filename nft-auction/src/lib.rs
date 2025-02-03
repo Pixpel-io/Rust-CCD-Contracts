@@ -159,6 +159,7 @@ fn add_item(
             creator: sender_address,
             token_id: item.token_id,
             cis2_contract: item.cis2_contract,
+            token_amount: item.token_amount
         },
     );
 
@@ -290,6 +291,7 @@ fn auction_finalize(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRes
         let highest_bid_amount = item.highest_bid;
         let token_id = item.token_id;
         let provided_contract = item.cis2_contract;
+        let token_amount = item.token_amount;
 
         drop(item);
 
@@ -314,7 +316,7 @@ fn auction_finalize(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRes
         client.transfer::<State, ContractTokenId, ContractTokenAmount, Error>(
             host,
             Transfer {
-                amount: 1.into(),
+                amount: token_amount,
                 from: concordium_std::Address::Account(auction_owner),
                 to: concordium_cis2::Receiver::Account(bidder_address),
                 token_id,

@@ -1,4 +1,4 @@
-use concordium_cis2::TokenIdU8;
+use concordium_cis2::{TokenAmountU64, TokenIdU8};
 use concordium_std::{Amount, ContractAddress, Deserial, SchemaType, Serial, Serialize, Timestamp};
 
 use crate::state::ItemState;
@@ -31,6 +31,8 @@ pub struct AddItemParameter {
     /// The cis2 token contract. Its tokens can be used to bid for items in this
     /// contract.
     pub cis2_contract: ContractAddress,
+    /// Amount of tokens to placed for a bid in auction
+    pub token_amount: TokenAmountU64
 }
 
 /// The `additionData` that has to be passed to the `bid` entry point.

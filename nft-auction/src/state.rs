@@ -1,4 +1,4 @@
-use concordium_cis2::TokenIdU8;
+use concordium_cis2::{TokenAmountU64, TokenIdU8};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, SchemaType, Serial, Serialize,
     StateApi, StateMap, Timestamp,
@@ -32,6 +32,8 @@ pub struct ItemState {
     /// The cis2 token contract. Its tokens can be used to bid for items in this
     /// contract.
     pub cis2_contract: ContractAddress,
+    /// Total amount of tokens placed for auction
+    pub token_amount: TokenAmountU64
 }
 
 /// The state of the smart contract.
