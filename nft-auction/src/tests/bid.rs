@@ -1,4 +1,3 @@
-use crate::tests::{initialize_chain_and_auction, ALICE, CAROL, CAROL_ADDR, SIGNER};
 use crate::{
     error::Error,
     params::{AddItemParameter, BidParams},
@@ -11,7 +10,9 @@ use concordium_std::{
     Timestamp,
 };
 
-use super::{ALICE_ADDR, BOB, BOB_ADDR};
+use super::{
+    initialize_chain_and_auction, ALICE, ALICE_ADDR, BOB, BOB_ADDR, CAROL, CAROL_ADDR, SIGNER,
+};
 
 /// A helper function to invoke `viewItemState` in auction to get a specefic
 /// item's current state in the auction contract
