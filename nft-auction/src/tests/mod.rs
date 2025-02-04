@@ -1,4 +1,3 @@
-// #![cfg(test)]
 use crate::{error::Error, params::BidParams, state::ItemState};
 use concordium_cis2::{
     AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, Receiver,
@@ -17,6 +16,7 @@ use concordium_std_derive::{account_address, signature_ed25519};
 mod bid;
 mod item;
 mod smoke;
+mod cancel;
 
 /// Dummy addresses as raw bytes
 pub const ALICE: AccountAddress =
