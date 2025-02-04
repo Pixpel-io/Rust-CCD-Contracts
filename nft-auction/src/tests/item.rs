@@ -23,18 +23,20 @@ fn add_item_by_contract() {
         token_amount: TokenAmount(1),
     };
 
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(0),
+        address: auction_contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
+        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
+    };
+
     // Adding the item for auction.
     let update_result = chain.contract_update(
         SIGNER,
         ALICE,
         Address::Contract(cis2_contract),
         Energy::from(10000),
-        UpdateContractPayload {
-            amount: Amount::from_ccd(0),
-            address: auction_contract,
-            receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-            message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-        },
+        payload,
     );
 
     assert!(update_result.is_err());
@@ -70,18 +72,20 @@ fn add_item_expired() {
         token_amount: TokenAmount(1),
     };
 
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(0),
+        address: auction_contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
+        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
+    };
+
     // Adding the item for auction.
     let update_result = chain.contract_update(
         SIGNER,
         ALICE,
         Address::Account(ALICE),
         Energy::from(10000),
-        UpdateContractPayload {
-            amount: Amount::from_ccd(0),
-            address: auction_contract,
-            receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-            message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-        },
+        payload,
     );
 
     assert!(update_result.is_err());
@@ -104,18 +108,20 @@ fn add_item_expired() {
         token_amount: TokenAmount(1),
     };
 
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(0),
+        address: auction_contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
+        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
+    };
+
     // Adding the item for auction.
     let update_result = chain.contract_update(
         SIGNER,
         ALICE,
         Address::Account(ALICE),
         Energy::from(10000),
-        UpdateContractPayload {
-            amount: Amount::from_ccd(0),
-            address: auction_contract,
-            receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-            message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-        },
+        payload,
     );
 
     assert!(update_result.is_err());
