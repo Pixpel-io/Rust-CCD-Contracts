@@ -40,6 +40,7 @@ pub const SIGNER: Signer = Signer::with_one_key();
 pub const ACC_INITIAL_BALANCE: Amount = Amount::from_ccd(10000);
 
 /// Dummy signature
+#[allow(unused)]
 pub const DUMMY_SIGNATURE: SignatureEd25519 = signature_ed25519!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
 
 /// A helper function to setup and initialize the auction and cis2_multi contracts as mocks

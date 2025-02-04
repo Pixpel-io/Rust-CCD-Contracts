@@ -7,7 +7,7 @@ use crate::{
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_smart_contract_testing::{Chain, Energy, UpdateContractPayload};
 use concordium_std::{
-    AccountAddress, Address, Amount, ContractAddress, OwnedParameter, OwnedReceiveName,
+    AccountAddress, Address, Amount, ContractAddress, Duration, OwnedParameter, OwnedReceiveName,
     Timestamp,
 };
 
@@ -77,8 +77,8 @@ fn bid_on_item(
     }
 }
 
-/// A smoke test case implemented to verify the basic flow of whole bidding process in the contract expectin
-/// no negatives. It verifies the following flow:
+/// A smoke test case implemented to verify the basic flow of whole bidding process in the contract expecting
+/// no negatives except bid finalization. It verifies the following flow:
 ///
 /// - ALICE adds an item for the auction in contract with minimum bid amount in CCD 10.
 /// - Test then validates that initially there should be no highest bidder in the item state.
@@ -180,4 +180,199 @@ fn bid_smoke() {
     assert_eq!(item.highest_bid, Amount::from_ccd(50));
     assert_eq!(item.highest_bidder, Some(CAROL));
     assert!(bob_balance_refunded > bob_balance_after_bid);
+}
+
+/// This testcase is implemented to test a negative.
+///
+/// Where ALICE adds an item for auction in contract and then tries to bid on it own auction item. This transaction
+/// in principle should be rejected by the contract since contract does not allow the creator to place a bid on its
+/// own item.
+///
+/// Test verifies the result by asserting that the transaction is reject by contract with reason `CreatorCanNotBid`
+#[test]
+fn bid_prohibited_by_creator() {
+    let (mut chain, _, auction_contract, cis2_contract) = initialize_chain_and_auction();
+
+    // Creating params for contract addItem invocation
+    let parameter = AddItemParameter {
+        name: "SomeItem".to_string(),
+        start: Timestamp::from_timestamp_millis(1000),
+        end: Timestamp::from_timestamp_millis(5000),
+        token_id: TokenID(1),
+        minimum_bid: Amount::from_ccd(10),
+        cis2_contract,
+        token_amount: TokenAmount(1),
+    };
+
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(0),
+        address: auction_contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
+        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
+    };
+
+    // ALICE adds some item in the contract
+    let _ = chain
+        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload)
+        .expect("[Error] Invocation failed while invoking 'addItem' ");
+
+    let item = get_item_state(&chain, auction_contract, ALICE, 1);
+
+    // Verify whether the item is added for the auction
+    assert_eq!(item.creator, ALICE);
+    assert_eq!(item.highest_bid, Amount::from_ccd(10));
+    assert_eq!(item.highest_bidder, None);
+
+    // Getting bid parameters
+    let bid_params = BidParams {
+        item_index: 1,
+        token_id: TokenID(1u8),
+    };
+
+    // ALICE tries to bid on its own auction item
+    let bid_result = bid_on_item(
+        &mut chain,
+        auction_contract,
+        ALICE,
+        ALICE_ADDR,
+        Amount::from_ccd(100),
+        bid_params,
+    );
+
+    // Verify whether the bid failed with reason CreatorCanNotBid
+    assert!(bid_result.is_err());
+    assert_eq!(Some(Error::CreatorCanNotBid), bid_result.err())
+}
+
+/// This testcase is intended to test multiples negatives while bidding, except bid finalization. It tests
+/// the following scenarios:
+///
+/// - ALICE adds an item for auction.
+/// - CAROL place a bid with amount 100 in CCD on the auction established by ALICE.
+/// - BOB tries to bid on ALICE's auction with wrong token ID and his bid is rejected with reason `WrongTokenID`.
+/// - BOB tries to bid again, but this time with wrong item index and his bid is rejected with reason `NoItem`.
+/// - BOB tries to bid third time, but this time the bid is too low than CAROL and its rejected with reason
+///   `BidNotGreaterCurrentBid`
+///
+/// In all of these BOB attemps, auction has past by its ending time and expires.
+///
+/// - Now BOB tries to bid on ALICE's expired auction again and gets rejected by the contract with reason
+///   `BidTooLate`
+///
+/// Test reutrns successful once all of these assertions are made.
+#[test]
+fn bid_not_allowed() {
+    let (mut chain, _, auction_contract, cis2_contract) = initialize_chain_and_auction();
+
+    // Creating params for contract addItem invocation
+    let parameter = AddItemParameter {
+        name: "SomeItem".to_string(),
+        start: Timestamp::from_timestamp_millis(1000),
+        end: Timestamp::from_timestamp_millis(5000),
+        token_id: TokenID(1),
+        minimum_bid: Amount::from_ccd(10),
+        cis2_contract,
+        token_amount: TokenAmount(1),
+    };
+
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(0),
+        address: auction_contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
+        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
+    };
+
+    // ALICE adds some item in the contract
+    let _ = chain
+        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload)
+        .expect("[Error] Invocation failed while invoking 'addItem' ");
+
+    // Getting bid parameters
+    let bid_params = BidParams {
+        token_id: TokenID(1u8),
+        item_index: 1,
+    };
+
+    // Now CAROL makes the highest bid on the item added by ALICE
+    let _ = bid_on_item(
+        &mut chain,
+        auction_contract,
+        CAROL,
+        CAROL_ADDR,
+        Amount::from_ccd(100),
+        bid_params,
+    )
+    .expect("[Error] Unable to place bid, invocation failed");
+
+    // Wrong bid parameters to be tried by BOB
+    let bid_params = vec![
+        (
+            BidParams {
+                token_id: TokenID(2u8),
+                item_index: 1,
+            },
+            Amount::from_ccd(50),
+        ),
+        (
+            BidParams {
+                token_id: TokenID(1u8),
+                item_index: 2,
+            },
+            Amount::from_ccd(50),
+        ),
+        (
+            BidParams {
+                token_id: TokenID(1u8),
+                item_index: 1,
+            },
+            Amount::from_ccd(50),
+        ),
+    ];
+
+    // Expected reasons of rejection whenever BOB tries to bid
+    // with wrong params
+    let reject_reasons = vec![
+        Error::WrongTokenID,
+        Error::NoItem,
+        Error::BidNotGreaterCurrentBid,
+    ];
+
+    // BOB makes multiple wrong tries to place bid on an item added by ALICE
+    for ((params, amount), expected_reason) in bid_params.iter().zip(reject_reasons) {
+        let bid_result = bid_on_item(
+            &mut chain,
+            auction_contract,
+            BOB,
+            BOB_ADDR,
+            *amount,
+            params.clone(),
+        );
+
+        // Verify whether the contract rejects the transaction
+        // with expected reason
+        assert_eq!(Some(expected_reason), bid_result.err())
+    }
+
+    // Fast forwardin chain in time by 10 seconds, this makes
+    // the auction expired
+    let _ = chain.tick_block_time(Duration::from_seconds(10));
+
+    let bid_params = BidParams {
+        token_id: TokenID(1u8),
+        item_index: 1,
+    };
+
+    // Now BOB tries to bid again on an expired auction
+    let bid_result = bid_on_item(
+        &mut chain,
+        auction_contract,
+        BOB,
+        BOB_ADDR,
+        Amount::from_ccd(150),
+        bid_params,
+    );
+
+    // Verify whether the transaction is rejected by contract
+    // with reason BidTooLate
+    assert_eq!(Some(Error::BidTooLate), bid_result.err())
 }

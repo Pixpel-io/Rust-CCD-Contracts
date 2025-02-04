@@ -45,7 +45,7 @@ pub struct AdditionalDataIndex {
 
 /// The parameter for the entry point `bid` that is used to bid on an active
 /// listed auction `NFT`
-#[derive(Serialize, SchemaType)]
+#[derive(Serialize, SchemaType, Clone)]
 pub struct BidParams {
     /// The NFT token ID to be sold
     pub token_id: TokenIdU8,
