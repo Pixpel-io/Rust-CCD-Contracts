@@ -16,6 +16,7 @@ use concordium_std_derive::{account_address, signature_ed25519};
 
 mod item;
 mod smoke;
+mod bid;
 
 /// Alice dummy account for testing
 pub const ALICE: AccountAddress =
@@ -30,6 +31,7 @@ pub const BOB_ADDR: Address = Address::Account(BOB);
 /// Carol dummy account for testing
 pub const CAROL: AccountAddress =
     account_address!("2y57FyMyqAfY7X1SuSWJ5VMt1Z3ZgxbKt9w5mGoTwqA7YcpbXr");
+pub const CAROL_ADDR: Address = Address::Account(CAROL);
 
 /// Dummy signer which always signs with one key
 pub const SIGNER: Signer = Signer::with_one_key();
