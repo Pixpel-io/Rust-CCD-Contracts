@@ -4,6 +4,10 @@ use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
 use concordium_std::{Address, Amount, Duration, OwnedParameter, OwnedReceiveName, Timestamp};
 
+/// This testcase is to test negative by trying to invoke `addItem` through some valid contract.
+/// Auction contract should in principle reject the invocation with reason -4 (Error::OnlyAccount).
+///
+/// The result is then verified by asserting the error received after invocation
 #[test]
 fn add_item_by_contract() {
     let (mut chain, _, auction_contract, cis2_contract) = initialize_chain_and_auction();
@@ -40,6 +44,17 @@ fn add_item_by_contract() {
     )
 }
 
+/// This testcase is to test negative by trying to invoke `addItem` with expired auction timeline.
+/// This test case checks two negatives:
+///
+/// - First condition is that the item is added with inconsistent timelline for auction, end time of auction
+///   is less than the auction start time. In principle, the invocation should fail with reason -2
+///
+/// - Second condition is that the chain is fast forwarded in time by 1 second since unix epoch, and then
+///   the item is added with end time less than 0.5 secs than block time. This invocation should fail with
+///   reason -3
+///
+/// The result is then verified by asserting the error received after invocation
 #[test]
 fn add_item_expired() {
     let (mut chain, _, auction_contract, cis2_contract) = initialize_chain_and_auction();

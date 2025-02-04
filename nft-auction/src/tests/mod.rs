@@ -77,20 +77,16 @@ pub fn initialize_chain_and_auction() -> (Chain, AccountKeys, ContractAddress, C
         .module_deploy_v1(SIGNER, CAROL, module)
         .expect("Deploy valid module");
 
+    let payload = InitContractPayload {
+        amount: Amount::zero(),
+        mod_ref: deployment.module_reference,
+        init_name: OwnedContractName::new_unchecked("init_cis2_multi".to_string()),
+        param: OwnedParameter::from_serial(&TokenAmountU64(100u64)).expect("Serialize parameter"),
+    };
+
     // Initialize the cis2 token contract.
     let token = chain
-        .contract_init(
-            SIGNER,
-            CAROL,
-            Energy::from(10000),
-            InitContractPayload {
-                amount: Amount::zero(),
-                mod_ref: deployment.module_reference,
-                init_name: OwnedContractName::new_unchecked("init_cis2_multi".to_string()),
-                param: OwnedParameter::from_serial(&TokenAmountU64(100u64))
-                    .expect("Serialize parameter"),
-            },
-        )
+        .contract_init(SIGNER, CAROL, Energy::from(10000), payload)
         .expect("Initialize cis2 token contract");
 
     // Load and deploy the auction module.
@@ -99,19 +95,16 @@ pub fn initialize_chain_and_auction() -> (Chain, AccountKeys, ContractAddress, C
         .module_deploy_v1(SIGNER, CAROL, module)
         .expect("Deploy valid module");
 
+    let payload = InitContractPayload {
+        amount: Amount::zero(),
+        mod_ref: deployment.module_reference,
+        init_name: OwnedContractName::new_unchecked("init_cis2-auction".to_string()),
+        param: OwnedParameter::empty(),
+    };
+
     // Initialize the auction contract.
     let init_auction = chain
-        .contract_init(
-            SIGNER,
-            CAROL,
-            Energy::from(10000),
-            InitContractPayload {
-                amount: Amount::zero(),
-                mod_ref: deployment.module_reference,
-                init_name: OwnedContractName::new_unchecked("init_cis2-auction".to_string()),
-                param: OwnedParameter::empty(),
-            },
-        )
+        .contract_init(SIGNER, CAROL, Energy::from(10000), payload)
         .expect("Initialize auction");
 
     (
@@ -138,7 +131,7 @@ pub struct MintParams {
 
 pub fn mint_token(chain: &mut Chain, account: AccountAddress, cis2_contract: ContractAddress) {
     let params = MintParams {
-        to: Receiver::from_account(ALICE),
+        to: Receiver::from_account(account),
         metadata_url: MetadataUrl {
             url: "https://some.example/token/0".to_string(),
             hash: None,
@@ -147,19 +140,20 @@ pub fn mint_token(chain: &mut Chain, account: AccountAddress, cis2_contract: Con
         data: AdditionalData::empty(),
     };
 
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(0),
+        address: cis2_contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.mint".to_string()),
+        message: OwnedParameter::from_serial(&params).expect("[Error] Serialization Failed"),
+    };
+
     let _ = chain
         .contract_update(
             SIGNER,
-            ALICE,
+            account,
             Address::Account(account),
             Energy::from(10000),
-            UpdateContractPayload {
-                amount: Amount::from_ccd(0),
-                address: cis2_contract,
-                receive_name: OwnedReceiveName::new_unchecked("cis2_multi.mint".to_string()),
-                message: OwnedParameter::from_serial(&params)
-                    .expect("[Error] Serialization Failed"),
-            },
+            payload,
         )
         .expect("[Error] Mint Failed");
 }
@@ -177,17 +171,19 @@ pub fn get_balance(
         }],
     };
 
+    let payload = UpdateContractPayload {
+        amount: Amount::zero(),
+        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.balanceOf".to_string()),
+        address: cis2_contract,
+        message: OwnedParameter::from_serial(&balance_of_params).expect("BalanceOf params"),
+    };
+
     let invoke = chain
         .contract_invoke(
             account,
             Address::Account(account),
             Energy::from(10000),
-            UpdateContractPayload {
-                amount: Amount::zero(),
-                receive_name: OwnedReceiveName::new_unchecked("cis2_multi.balanceOf".to_string()),
-                address: cis2_contract,
-                message: OwnedParameter::from_serial(&balance_of_params).expect("BalanceOf params"),
-            },
+            payload,
         )
         .expect("[Error] Balance_Of query Invocation failed");
 
