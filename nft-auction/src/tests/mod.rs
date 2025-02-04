@@ -130,6 +130,11 @@ pub struct MintParams {
     pub data: AdditionalData,
 }
 
+/// A helper function which invokes `cis2_multi` contract to `mint` airdrop tokens for the given
+/// account.
+/// 
+/// This is useful for minting some mock tokens to be tested in integration tests by auction
+/// contract
 pub fn mint_token(chain: &mut Chain, account: AccountAddress, cis2_contract: ContractAddress) {
     let params = MintParams {
         to: Receiver::from_account(account),
