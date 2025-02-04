@@ -1,82 +1,15 @@
 use crate::{
     error::Error,
     params::{AddItemParameter, BidParams},
-    state::ItemState,
 };
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
-use concordium_smart_contract_testing::{Chain, Energy, UpdateContractPayload};
-use concordium_std::{
-    AccountAddress, Address, Amount, ContractAddress, Duration, OwnedParameter, OwnedReceiveName,
-    Timestamp,
-};
+use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
+use concordium_std::{Amount, Duration, OwnedParameter, OwnedReceiveName, Timestamp};
 
 use super::{
-    initialize_chain_and_auction, ALICE, ALICE_ADDR, BOB, BOB_ADDR, CAROL, CAROL_ADDR, SIGNER,
+    bid_on_item, get_item_state, initialize_chain_and_auction, ALICE, ALICE_ADDR, BOB, BOB_ADDR,
+    CAROL, CAROL_ADDR, SIGNER,
 };
-
-/// A helper function to invoke `viewItemState` in auction to get a specefic
-/// item's current state in the auction contract
-///
-/// Returns the `ItemState` type or panics with error message
-fn get_item_state(
-    chain: &Chain,
-    contract: ContractAddress,
-    account: AccountAddress,
-    item_index: u16,
-) -> ItemState {
-    let view_item_params = item_index;
-
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.viewItemState".to_string()),
-        message: OwnedParameter::from_serial(&view_item_params)
-            .expect("[Error] Unable to serialize view item params"),
-    };
-
-    let item: ItemState = chain
-        .contract_invoke(
-            account,
-            Address::Account(account),
-            Energy::from(10000),
-            payload,
-        )
-        .expect("[Error] Invocation failed while invoking 'addItem' ")
-        .parse_return_value()
-        .expect("[Error] Unable to deserialize ItemState");
-
-    item
-}
-
-/// A helper function to invoke `bid` function in auction contract to bid on an
-/// item listed for auction
-///
-/// Returns the `Ok()` if the invocation succeeds or else `auction::Error`
-fn bid_on_item(
-    chain: &mut Chain,
-    contract: ContractAddress,
-    invoker: AccountAddress,
-    sender: Address,
-    amount: Amount,
-    bid_params: BidParams,
-) -> Result<(), Error> {
-    let payload = UpdateContractPayload {
-        amount,
-        address: contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.bid".to_string()),
-        message: OwnedParameter::from_serial(&bid_params)
-            .expect("[Error] Unable to serialize bid_params"),
-    };
-
-    // BOB bids on the item added by ALICE
-    let invoke_result =
-        chain.contract_update(SIGNER, invoker, sender, Energy::from(10000), payload);
-
-    match invoke_result {
-        Ok(_) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
-}
 
 /// A smoke test case implemented to verify the basic flow of whole bidding process in the contract expecting
 /// no negatives except bid finalization. It verifies the following flow:
