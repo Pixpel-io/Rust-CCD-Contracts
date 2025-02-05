@@ -3,6 +3,6 @@ pub mod contract;
 pub mod errors;
 pub mod params;
 pub mod state;
-// pub mod tests;
 pub mod response;
 pub mod types;
+// pub mod tests;
