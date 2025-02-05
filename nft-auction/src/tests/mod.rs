@@ -169,7 +169,10 @@ pub fn mint_token(
         .expect("[Error] Mint Failed");
 }
 
-/// Get the `TokenIdU8(1)` balances for Alice and the auction contract.
+/// A helper function which invokes `cis2_multi` contract to get the balance of specific tokens minted
+/// for a specifi account.
+///
+/// This is useful for integration testing
 pub fn get_token_balance(
     chain: &Chain,
     account: AccountAddress,
@@ -204,6 +207,10 @@ pub fn get_token_balance(
         .expect("[Error] Unable to deserialize response Balance_Of quary")
 }
 
+/// A helper function which invokes `cis2_multi` contract to update the operator of a certain
+/// account or contract.
+///
+/// This is useful for integration testing
 fn update_operator_of(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -229,6 +236,10 @@ fn update_operator_of(
         .expect("[Error] Unable to Update Operator, invocation failed");
 }
 
+/// A helper function which invokes `cis2_multi` to check if an account or contract is
+/// operator of an owner in ci2_contract
+///
+/// This is useful for integration testing
 fn ensure_is_operator_of(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -324,6 +335,10 @@ fn bid_on_item(
     }
 }
 
+/// A helper function to invoke `addItem` function in auction contract to list an
+/// item for auction
+///
+/// Returns the `Ok()` if the invocation succeeds or else `auction::Error`
 fn add_item_for_auction(
     chain: &mut Chain,
     contract: ContractAddress,
@@ -349,6 +364,10 @@ fn add_item_for_auction(
     }
 }
 
+/// A helper function to invoke `finalize` function in auction contract for item finalization
+/// listed in active auctions
+///
+/// Returns the `Ok()` if the invocation succeeds or else `auction::Error`
 fn finalize_auction(
     chain: &mut Chain,
     contract: ContractAddress,
@@ -376,6 +395,9 @@ fn finalize_auction(
     }
 }
 
+/// Mapping `ContractInvokeError` to `auction::error::Error`
+///
+/// It parse any invocation error captured while integration testing to contract error
 impl From<ContractInvokeError> for Error {
     fn from(value: ContractInvokeError) -> Self {
         if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
