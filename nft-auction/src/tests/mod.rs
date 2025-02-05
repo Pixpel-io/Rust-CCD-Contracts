@@ -1,7 +1,6 @@
-use crate::{error::Error, params::BidParams, state::ItemState};
+use crate::{error::Error, params::{AddItemParameter, BidParams}, state::ItemState};
 use concordium_cis2::{
-    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, Receiver,
-    TokenAmountU64, TokenIdU8,
+    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, OperatorOfQuery, OperatorOfQueryParams, OperatorOfQueryResponse, OperatorUpdate, Receiver, TokenAmountU64, TokenIdU8, UpdateOperator, UpdateOperatorParams
 };
 use concordium_smart_contract_testing::{
     module_load_v1, Account, AccountKeys, Chain, ContractInvokeError, ContractInvokeErrorKind,
@@ -14,9 +13,10 @@ use concordium_std::{
 use concordium_std_derive::{account_address, signature_ed25519};
 
 mod bid;
+mod cancel;
+mod finalize;
 mod item;
 mod smoke;
-mod cancel;
 
 /// Dummy addresses as raw bytes
 pub const ALICE: AccountAddress =
@@ -132,17 +132,20 @@ pub struct MintParams {
 
 /// A helper function which invokes `cis2_multi` contract to `mint` airdrop tokens for the given
 /// account.
-/// 
+///
 /// This is useful for minting some mock tokens to be tested in integration tests by auction
 /// contract
-pub fn mint_token(chain: &mut Chain, account: AccountAddress, cis2_contract: ContractAddress) {
+pub fn mint_token(
+    chain: &mut Chain,
+    account: AccountAddress,
+    cis2_contract: ContractAddress,
+    token_id: TokenIdU8,
+    url: String,
+) {
     let params = MintParams {
         to: Receiver::from_account(account),
-        metadata_url: MetadataUrl {
-            url: "https://some.example/token/0".to_string(),
-            hash: None,
-        },
-        token_id: concordium_cis2::TokenIdU8(1u8),
+        metadata_url: MetadataUrl { url, hash: None },
+        token_id,
         data: AdditionalData::empty(),
     };
 
@@ -165,15 +168,16 @@ pub fn mint_token(chain: &mut Chain, account: AccountAddress, cis2_contract: Con
 }
 
 /// Get the `TokenIdU8(1)` balances for Alice and the auction contract.
-pub fn get_balance(
+pub fn get_token_balance(
     chain: &Chain,
     account: AccountAddress,
     cis2_contract: ContractAddress,
+    token_id: TokenIdU8,
 ) -> BalanceOfQueryResponse<TokenAmountU64> {
     let balance_of_params: BalanceOfQueryParams<_> = BalanceOfQueryParams {
         queries: vec![BalanceOfQuery {
-            token_id: TokenIdU8(1),
-            address: ALICE_ADDR,
+            token_id,
+            address: Address::Account(account),
         }],
     };
 
@@ -196,6 +200,64 @@ pub fn get_balance(
     invoke
         .parse_return_value()
         .expect("[Error] Unable to deserialize response Balance_Of quary")
+}
+
+fn update_operator_of(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    sender: Address,
+    operator_to_be: Address,
+    cis2_contract: ContractAddress,
+) {
+    let update_operator_params = UpdateOperatorParams(vec![UpdateOperator {
+        update: OperatorUpdate::Add,
+        operator: operator_to_be,
+    }]);
+
+    let payload = UpdateContractPayload {
+        amount: Amount::zero(),
+        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.updateOperator".to_string()),
+        address: cis2_contract,
+        message: OwnedParameter::from_serial(&update_operator_params)
+            .expect("[Error] Unable to serialize UpdateOperator params"),
+    };
+
+    let _ = chain
+        .contract_update(SIGNER, invoker, sender, Energy::from(10000), payload)
+        .expect("[Error] Unable to Update Operator, invocation failed");   
+}
+
+
+fn ensure_is_operator_of(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    sender: Address,
+    is_operator: Address,
+    cis2_contract: ContractAddress,
+) -> bool {
+    let is_operator_params = OperatorOfQueryParams{
+        queries: vec![OperatorOfQuery{
+            owner: sender,
+            address: is_operator
+        }]
+    };
+
+    let payload = UpdateContractPayload {
+        amount: Amount::zero(),
+        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.operatorOf".to_string()),
+        address: cis2_contract,
+        message: OwnedParameter::from_serial(&is_operator_params)
+            .expect("[Error] Unable to serialize UpdateOperator params"),
+    };
+
+    let response: OperatorOfQueryResponse = chain
+        .contract_invoke(invoker, sender, Energy::from(10000), payload)
+        .expect("[Error] Unable to Update Operator, invocation failed")
+        .parse_return_value()
+        .expect("[Error] Unable parse OperatorOfQueryResponse");
+
+    response.0[0]
+
 }
 
 /// A helper function to invoke `viewItemState` in auction to get a specefic
@@ -249,6 +311,58 @@ fn bid_on_item(
         address: contract,
         receive_name: OwnedReceiveName::new_unchecked("cis2-auction.bid".to_string()),
         message: OwnedParameter::from_serial(&bid_params)
+            .expect("[Error] Unable to serialize bid_params"),
+    };
+
+    // BOB bids on the item added by ALICE
+    let invoke_result =
+        chain.contract_update(SIGNER, invoker, sender, Energy::from(10000), payload);
+
+    match invoke_result {
+        Ok(_) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn add_item_for_auction(
+    chain: &mut Chain,
+    contract: ContractAddress,
+    invoker: AccountAddress,
+    sender: Address,
+    add_item_params: AddItemParameter,
+) -> Result<(), Error> {
+    let payload = UpdateContractPayload {
+        amount: Amount::zero(),
+        address: contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
+        message: OwnedParameter::from_serial(&add_item_params)
+            .expect("[Error] Unable to serialize bid_params"),
+    };
+
+    // BOB bids on the item added by ALICE
+    let invoke_result =
+        chain.contract_update(SIGNER, invoker, sender, Energy::from(10000), payload);
+
+    match invoke_result {
+        Ok(_) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn finalize_auction(
+    chain: &mut Chain,
+    contract: ContractAddress,
+    invoker: AccountAddress,
+    sender: Address,
+    item_index: u16,
+) -> Result<(), Error> {
+    let item_index_params = item_index;
+
+    let payload = UpdateContractPayload {
+        amount: Amount::zero(),
+        address: contract,
+        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.finalize".to_string()),
+        message: OwnedParameter::from_serial(&item_index_params)
             .expect("[Error] Unable to serialize bid_params"),
     };
 

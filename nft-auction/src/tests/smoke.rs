@@ -1,5 +1,5 @@
 use crate::tests::{
-    get_balance, initialize_chain_and_auction, mint_token, ALICE, ALICE_ADDR, SIGNER,
+    get_token_balance, initialize_chain_and_auction, mint_token, ALICE, ALICE_ADDR, SIGNER,
 };
 
 use crate::{
@@ -87,9 +87,15 @@ fn auction_smoke() {
 fn airdrop_mint_smoke() {
     let (mut chain, _, _, cis2_contract) = initialize_chain_and_auction();
 
-    mint_token(&mut chain, ALICE, cis2_contract);
+    mint_token(
+        &mut chain,
+        ALICE,
+        cis2_contract,
+        TokenIdU8(1u8),
+        "//some.example/token/0".to_string(),
+    );
 
-    let balance_of_alice = get_balance(&chain, ALICE, cis2_contract);
+    let balance_of_alice = get_token_balance(&chain, ALICE, cis2_contract, TokenIdU8(1u8));
 
     assert_eq!(balance_of_alice.0, [TokenAmountU64(100)])
 }
