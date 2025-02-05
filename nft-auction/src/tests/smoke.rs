@@ -1,5 +1,6 @@
 use crate::tests::{
-    get_token_balance, initialize_chain_and_auction, mint_token, ALICE, ALICE_ADDR, SIGNER,
+    add_item_for_auction, get_token_balance, initialize_chain_and_auction, mint_token, ALICE,
+    ALICE_ADDR,
 };
 
 use crate::{
@@ -8,7 +9,7 @@ use crate::{
 };
 use concordium_cis2::{TokenAmountU64, TokenIdU8};
 use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
-use concordium_std::{Address, Amount, OwnedParameter, OwnedReceiveName, Timestamp};
+use concordium_std::{Amount, OwnedParameter, OwnedReceiveName, Timestamp};
 
 #[test]
 fn auction_smoke() {
@@ -26,20 +27,7 @@ fn auction_smoke() {
     };
 
     // Adding the item for auction.
-    let _ = chain
-        .contract_update(
-            SIGNER,
-            ALICE,
-            Address::Account(ALICE),
-            Energy::from(10000),
-            UpdateContractPayload {
-                amount: Amount::from_ccd(0),
-                address: auction_contract,
-                receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-                message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-            },
-        )
-        .expect("Should be able to add Item");
+    let _ = add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     // Invoke the view entry point and check that the item was added.
     let invoke = chain

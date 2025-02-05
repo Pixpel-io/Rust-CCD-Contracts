@@ -1,6 +1,12 @@
-use crate::{error::Error, params::{AddItemParameter, BidParams}, state::ItemState};
+use crate::{
+    error::Error,
+    params::{AddItemParameter, BidParams},
+    state::ItemState,
+};
 use concordium_cis2::{
-    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, OperatorOfQuery, OperatorOfQueryParams, OperatorOfQueryResponse, OperatorUpdate, Receiver, TokenAmountU64, TokenIdU8, UpdateOperator, UpdateOperatorParams
+    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, OperatorOfQuery,
+    OperatorOfQueryParams, OperatorOfQueryResponse, OperatorUpdate, Receiver, TokenAmountU64,
+    TokenIdU8, UpdateOperator, UpdateOperatorParams,
 };
 use concordium_smart_contract_testing::{
     module_load_v1, Account, AccountKeys, Chain, ContractInvokeError, ContractInvokeErrorKind,
@@ -8,9 +14,9 @@ use concordium_smart_contract_testing::{
 };
 use concordium_std::{
     AccountAddress, AccountBalance, Address, Amount, ContractAddress, MetadataUrl,
-    OwnedContractName, OwnedParameter, OwnedReceiveName, SchemaType, Serial, SignatureEd25519,
+    OwnedContractName, OwnedParameter, OwnedReceiveName, SchemaType, Serial,
 };
-use concordium_std_derive::{account_address, signature_ed25519};
+use concordium_std_derive::account_address;
 
 mod bid;
 mod cancel;
@@ -36,10 +42,6 @@ pub const SIGNER: Signer = Signer::with_one_key();
 
 /// Account balance to initilize the test accounts
 pub const ACC_INITIAL_BALANCE: Amount = Amount::from_ccd(10000);
-
-/// Dummy signature
-#[allow(unused)]
-pub const DUMMY_SIGNATURE: SignatureEd25519 = signature_ed25519!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
 
 /// A helper function to setup and initialize the auction and cis2_multi contracts as mocks
 /// for unit testing.
@@ -224,9 +226,8 @@ fn update_operator_of(
 
     let _ = chain
         .contract_update(SIGNER, invoker, sender, Energy::from(10000), payload)
-        .expect("[Error] Unable to Update Operator, invocation failed");   
+        .expect("[Error] Unable to Update Operator, invocation failed");
 }
-
 
 fn ensure_is_operator_of(
     chain: &mut Chain,
@@ -235,11 +236,11 @@ fn ensure_is_operator_of(
     is_operator: Address,
     cis2_contract: ContractAddress,
 ) -> bool {
-    let is_operator_params = OperatorOfQueryParams{
-        queries: vec![OperatorOfQuery{
+    let is_operator_params = OperatorOfQueryParams {
+        queries: vec![OperatorOfQuery {
             owner: sender,
-            address: is_operator
-        }]
+            address: is_operator,
+        }],
     };
 
     let payload = UpdateContractPayload {
@@ -257,7 +258,6 @@ fn ensure_is_operator_of(
         .expect("[Error] Unable parse OperatorOfQueryResponse");
 
     response.0[0]
-
 }
 
 /// A helper function to invoke `viewItemState` in auction to get a specefic

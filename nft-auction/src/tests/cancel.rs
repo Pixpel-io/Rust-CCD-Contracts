@@ -2,6 +2,7 @@ use crate::{
     error::Error,
     params::{AddItemParameter, BidParams},
     state::AuctionState,
+    tests::add_item_for_auction,
 };
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_smart_contract_testing::{Chain, Energy, UpdateContractPayload};
@@ -62,17 +63,8 @@ fn cancel_auction_smoke() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // ALICE adds some item in the contract
-    let _ = chain
-        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload)
-        .expect("[Error] Invocation failed while invoking 'addItem' ");
+    let _ = add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     let bob_balance_before_bid = chain.account_balance(BOB);
 
@@ -160,28 +152,10 @@ fn cancel_auction_unauthorize() {
         token_amount: TokenAmount(1),
     };
 
-    let payload_1 = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&item_1).expect("Serialize parameter"),
-    };
-
-    let payload_2 = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&item_2).expect("Serialize parameter"),
-    };
-
     // ALICE establishes two auctions with two items
-    let _ = chain
-        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload_1)
-        .expect("[Error] Invocation failed while invoking 'addItem' ");
-
-    let _ = chain
-        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload_2)
-        .expect("[Error] Invocation failed while invoking 'addItem' ");
+    for item in [item_1, item_2] {
+        let _ = add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, item);
+    }
 
     // Item indexes of the two items listed for two separate
     // auctions in contract

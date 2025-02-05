@@ -1,8 +1,7 @@
-use crate::tests::{initialize_chain_and_auction, ALICE, SIGNER};
+use crate::tests::{add_item_for_auction, initialize_chain_and_auction, ALICE, ALICE_ADDR};
 use crate::{error, params::AddItemParameter};
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
-use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
-use concordium_std::{Address, Amount, Duration, OwnedParameter, OwnedReceiveName, Timestamp};
+use concordium_std::{Address, Amount, Duration, Timestamp};
 
 /// This testcase is to test negative by trying to invoke `addItem` through some valid contract.
 /// Auction contract should in principle reject the invocation with reason -4 (Error::OnlyAccount).
@@ -23,20 +22,13 @@ fn add_item_by_contract() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // Adding the item for auction.
-    let update_result = chain.contract_update(
-        SIGNER,
+    let update_result = add_item_for_auction(
+        &mut chain,
+        auction_contract,
         ALICE,
         Address::Contract(cis2_contract),
-        Energy::from(10000),
-        payload,
+        parameter,
     );
 
     assert!(update_result.is_err());
@@ -72,21 +64,9 @@ fn add_item_expired() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // Adding the item for auction.
-    let update_result = chain.contract_update(
-        SIGNER,
-        ALICE,
-        Address::Account(ALICE),
-        Energy::from(10000),
-        payload,
-    );
+    let update_result =
+        add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     assert!(update_result.is_err());
     assert_eq!(
@@ -108,21 +88,9 @@ fn add_item_expired() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // Adding the item for auction.
-    let update_result = chain.contract_update(
-        SIGNER,
-        ALICE,
-        Address::Account(ALICE),
-        Energy::from(10000),
-        payload,
-    );
+    let update_result =
+        add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     assert!(update_result.is_err());
     assert_eq!(

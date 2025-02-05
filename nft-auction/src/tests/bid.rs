@@ -1,14 +1,14 @@
 use crate::{
     error::Error,
     params::{AddItemParameter, BidParams},
+    tests::add_item_for_auction,
 };
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
-use concordium_smart_contract_testing::{Energy, UpdateContractPayload};
-use concordium_std::{Amount, Duration, OwnedParameter, OwnedReceiveName, Timestamp};
+use concordium_std::{Amount, Duration, Timestamp};
 
 use super::{
     bid_on_item, get_item_state, initialize_chain_and_auction, ALICE, ALICE_ADDR, BOB, BOB_ADDR,
-    CAROL, CAROL_ADDR, SIGNER,
+    CAROL, CAROL_ADDR,
 };
 
 /// A smoke test case implemented to verify the basic flow of whole bidding process in the contract expecting
@@ -38,17 +38,8 @@ fn bid_smoke() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // ALICE adds some item in the contract
-    let _ = chain
-        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload)
-        .expect("[Error] Invocation failed while invoking 'addItem' ");
+    let _ = add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     let item = get_item_state(&chain, auction_contract, ALICE, 1);
 
@@ -138,17 +129,8 @@ fn bid_prohibited_by_creator() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // ALICE adds some item in the contract
-    let _ = chain
-        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload)
-        .expect("[Error] Invocation failed while invoking 'addItem' ");
+    let _ = add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     let item = get_item_state(&chain, auction_contract, ALICE, 1);
 
@@ -209,17 +191,8 @@ fn bid_not_allowed() {
         token_amount: TokenAmount(1),
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: auction_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2-auction.addItem".to_string()),
-        message: OwnedParameter::from_serial(&parameter).expect("Serialize parameter"),
-    };
-
     // ALICE adds some item in the contract
-    let _ = chain
-        .contract_update(SIGNER, ALICE, ALICE_ADDR, Energy::from(10000), payload)
-        .expect("[Error] Invocation failed while invoking 'addItem' ");
+    let _ = add_item_for_auction(&mut chain, auction_contract, ALICE, ALICE_ADDR, parameter);
 
     // Getting bid parameters
     let bid_params = BidParams {
