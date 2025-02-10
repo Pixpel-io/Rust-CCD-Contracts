@@ -1,26 +1,26 @@
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "test"
+name = "concordium-launchpad-contract"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
-authors = [ "mac" ]
-description = "abc"
+authors = [ "Pixpel.io (https://pixpel.io/)" ]
+description = "Launchpad smart contract on concordium blockchain"
 
 [features]
 default = ["std"]
 std = ["concordium-std/std", "concordium-cis2/std"]
-wee_alloc = ["concordium-std/wee_alloc"]
+bump_alloc = ["concordium-std/bump_alloc"]
 
 [dependencies]
-concordium-std = {version = "*", default-features = false}
-concordium-cis2 = "*"
+concordium-std = {version = "10.1.0", default-features = false}
+concordium-cis2 = "6.2.0"
 chrono = "0.4.26"
 
 
 [dev-dependencies]
-concordium-smart-contract-testing = "1.0"
+concordium-smart-contract-testing = "4.3.0"
 
 [lib]
 crate-type=["cdylib", "rlib"]

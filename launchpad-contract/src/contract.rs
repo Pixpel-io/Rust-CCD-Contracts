@@ -63,9 +63,9 @@ use crate::response::*;
 use crate::state::State;
 use crate::types::*;
 
-fn get_token_reserve<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn get_token_reserve(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
     token_info: &TokenInfo,
 ) -> ContractResult<ContractTokenAmount> {
     crate::cis2_client::Cis2Client::get_balance(
@@ -78,9 +78,9 @@ fn get_token_reserve<S: HasStateApi>(
 
 /// Initialize the contract instance.
 #[init(contract = "launchpad", parameter = "InitParameter")]
-fn init<S: HasStateApi>(
+fn init(
     _ctx: &impl HasInitContext,
-    _state_builder: &mut StateBuilder<S>,
+    _state_builder: &mut StateBuilder,
 ) -> InitResult<State> {
     // Parse the parameter.
     let param: InitParameter = _ctx.parameter_cursor().get()?;
@@ -102,9 +102,9 @@ fn init<S: HasStateApi>(
     error = "VestingError",
     payable
 )]
-fn create_launchpad<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn create_launchpad(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
     _amount: Amount,
 ) -> VestingResult<()> {
     // Ensure that the sender is an account.
@@ -232,9 +232,9 @@ fn create_launchpad<S: HasStateApi>(
     name = "onReceivingCIS2",
     error = "VestingError"
 )]
-fn token_on_cis2_received<S: HasStateApi>(
-    _ctx: &impl HasReceiveContext,
-    _host: &impl HasHost<State, StateApiType = S>,
+fn token_on_cis2_received(
+    _ctx: &ReceiveContext,
+    _host: &Host<State>,
 ) -> VestingResult<()> {
     Ok(())
 }
@@ -248,9 +248,9 @@ fn token_on_cis2_received<S: HasStateApi>(
     mutable
 )]
 
-fn update_admin<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn update_admin(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
 ) -> VestingResult<()> {
     let sender = match ctx.sender() {
         Address::Account(acc) => acc,
@@ -275,9 +275,9 @@ fn update_admin<S: HasStateApi>(
     parameter = "LivePauseParam",
     error = "VestingError"
 )]
-fn live_pause<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn live_pause(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
 ) -> VestingResult<()> {
     // Ensure that the sender is an account.
     match ctx.sender() {
@@ -391,9 +391,9 @@ fn live_pause<S: HasStateApi>(
     parameter = "VestParams",
     error = "VestingError"
 )]
-fn vest<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn vest(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
     _amount: Amount,
 ) -> VestingResult<()> {
     // Ensure that the sender is an account.
@@ -575,9 +575,9 @@ fn vest<S: HasStateApi>(
     parameter = "LaunchpadID",
     error = "VestingError"
 )]
-fn retrieve<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn retrieve(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
 ) -> VestingResult<()> {
     // Ensure that the sender is an account.
     let acc = match ctx.sender() {
@@ -648,9 +648,9 @@ fn retrieve<S: HasStateApi>(
     parameter = "CancelParam",
     error = "VestingError"
 )]
-fn cancel<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn cancel(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
 ) -> VestingResult<()> {
     let sender_address = match ctx.sender() {
         Address::Account(acc) => acc,
@@ -747,9 +747,9 @@ fn cancel<S: HasStateApi>(
     parameter = "WithdrawParam",
     error = "VestingError"
 )]
-fn send_ccd_to_dev<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn send_ccd_to_dev(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
 ) -> VestingResult<()> {
     match ctx.sender() {
         Address::Account(acc) => acc,
@@ -824,9 +824,9 @@ fn send_ccd_to_dev<S: HasStateApi>(
     parameter = "ClaimParams",
     error = "VestingError"
 )]
-fn claim<S: HasStateApi>(
-    ctx: &impl HasReceiveContext,
-    host: &mut impl HasHost<State, StateApiType = S>,
+fn claim(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
 ) -> VestingResult<()> {
     let sender_address = match ctx.sender() {
         Address::Account(acc) => acc,
@@ -932,9 +932,9 @@ fn claim<S: HasStateApi>(
 }
 
 #[receive(contract = "launchpad", name = "view", return_value = "VestingView")]
-fn view<S: HasStateApi>(
-    _ctx: &impl HasReceiveContext,
-    host: &impl HasHost<State, StateApiType = S>,
+fn view(
+    _ctx: &ReceiveContext,
+    host: &Host<State>,
 ) -> ReceiveResult<VestingView> {
     let total_launchpad = host.state().total_launchpad.clone();
     let launchpad = host.state().launchpad.clone();
