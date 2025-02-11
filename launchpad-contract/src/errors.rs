@@ -2,7 +2,7 @@
 use concordium_std::*;
 
 #[derive(Serialize, Debug, PartialEq, Eq, Reject, SchemaType)]
-pub enum VestingError {
+pub enum LaunchPadError {
     /// Raised when parsing the parameter failed.
     #[from(ParseError)]
     ParsingFailed, //1
@@ -15,7 +15,7 @@ pub enum VestingError {
     NotOwner,                      // 7
     NotLive,                       // 8
     UserNotExist,                  // 9
-    InsuffiecientFunds,            // 10
+    InsuffiecienRegFee,            // 10
     MinimumInvestmentNotSatisfied, // 11
     LaunchReachedToMaximum,        // 12
     HardcapLimitReached,           // 13
@@ -38,4 +38,7 @@ pub enum VestingError {
     LivePauseTimeRestricted,       // 30
     LivePauseCycleCompleted,       // 31
     HardcapNot40ToSoftcap,         // 32
+    InCorrectTimePeriod,
+    InCorrectCliffPeriod,
+    ProductNameAlreadyTaken
 }
