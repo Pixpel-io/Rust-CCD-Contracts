@@ -1,16 +1,11 @@
 use concordium_cis2::TokenAmountU64;
-use concordium_std::{collections::BTreeMap, *};
+use concordium_std::{
+    AccountAddress, Amount, ContractAddress, DeserialWithState, HashMap, SchemaType, Serial,
+    Serialize, StateApi, StateBuilder, StateMap, Timestamp,
+};
 use twox_hash::xxh3::hash64;
 
-use crate::{errors::LaunchPadError, params::CreateParams, types::*};
-
-// #[derive(Serialize, Clone)]
-// pub struct State {
-//     pub total_launchpad: LaunchpadID, // length of launchpad
-//     pub launchpad: BTreeMap<LaunchpadID, Launchpad>,
-//     pub lockup_details: BTreeMap<LaunchpadID, LockupDetails>,
-//     pub admin: AccountAddress,
-// }
+use crate::{errors::LaunchPadError, params::CreateParams};
 
 /// Launch-pad unique ID generated from product name
 pub type LaunchPadID = u64;
@@ -35,7 +30,7 @@ pub struct State<S = StateApi> {
     pub launchpads: StateMap<LaunchPadID, LaunchPad, S>,
     /// Container which holds the list of all the investors on the platform with
     /// associative list representing the launchpads in which they contribute
-    pub investors: StateMap<AccountAddress, LaunchPadID, S>,
+    pub investors: StateMap<AccountAddress, Vec<LaunchPadID>, S>,
     /// Admin details of the contract
     pub admin: Admin,
     /// A counter that is sequentially increased whenever a new launchpad is added to
@@ -46,7 +41,7 @@ pub struct State<S = StateApi> {
 impl State {
     /// Getter function to get the platform registeration fee
     /// for launch-pad creation
-    /// 
+    ///
     /// Returns `Amount` in CCD
     pub fn registeration_fee(&self) -> Amount {
         self.admin.registeration_fee
@@ -129,10 +124,10 @@ pub struct TimePeriod {
 impl TimePeriod {
     /// Ensure whether the time period given is within the
     /// valid realistic range
-    /// 
+    ///
     /// Returns `Ok()` or else `VestingError`
     pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), LaunchPadError> {
-        if self.start >= self.end && self.end <= current{
+        if self.start >= self.end && self.end <= current {
             return Err(LaunchPadError::InCorrectTimePeriod);
         }
         Ok(())
@@ -190,6 +185,8 @@ pub struct Admin {
     token_allocation_cut: u8,
 }
 
+/// Alias to hold details regarding vesting releases in each
+/// release cycle rolled
 pub type ReleaseData = HashMap<AccountAddress, (TokenAmount, Timestamp)>;
 
 #[derive(Serialize, SchemaType, Debug)]
