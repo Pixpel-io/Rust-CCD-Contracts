@@ -73,6 +73,6 @@ struct State {
     lockup_details: BTreeMap<LaunchpadID, LockupDetails>,
 }
 
-pub type VestingResult<T> = Result<T, LaunchPadError>;
+pub type LaunchPadResult<T> = Result<T, LaunchPadError>;
 
 // Contract functions

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{state::{Admin, Product, TimePeriod, VestingLimits}, types::*};
+use crate::{state::{Admin, Product, TimePeriod, VestingLimits}, types::*, ProductName};
 use concordium_std::*;
 
 /// Contract initialization parameters to be passed at the time
@@ -34,9 +34,9 @@ pub struct CreateParams {
 }
 
 impl CreateParams {
-    /// Getter function to get the provided timestamp
+    /// Getter function to get the provided time period
     /// of cliff
-    pub fn cliff_timestamp(&self) -> Timestamp {
+    pub fn cliff(&self) -> TimePeriod {
         self.lockup_details.cliff
     }
 
@@ -51,15 +51,34 @@ impl CreateParams {
 #[derive(Serialize, SchemaType)]
 pub struct LockupDetails {
     /// Cliff duration until vesting starts
-    pub cliff: Timestamp,
+    pub cliff: TimePeriod,
     /// Vesting cycles based on months for linear vesting 
     pub release_cycles: u8,
 }
 
+/// Parameters to be passed while invoking the `ApproveLaunchPad` by admin
+/// to approve or reject the Launch-pad
 #[derive(Serialize, SchemaType)]
-pub struct LivePauseParam {
-    pub id: LaunchpadID,
-    pub is_live: Live,
+pub struct ApprovalParams {
+    /// Product name to uniquely identify the launch-pad
+    /// for approval
+    pub product_name: ProductName,
+    /// A boolean if `true` means approved, if `false`
+    /// mean rejected 
+    pub approve: bool,
+}
+
+/// Parameters to be passed while invoking `LivePause` to pause or resume 
+/// launch-pad vesting
+#[derive(Serialize, SchemaType)]
+pub struct LivePauseParams {
+    /// Product name for unique launch-pad identification
+    pub poduct_name: ProductName,
+    /// Duration for which the launch-pad is to be pause.
+    /// It must be greater than 48 hrs
+    pub pause_duration: TimePeriod,
+    /// Boolean for making launch pause or live
+    pub to_pause: bool,
 }
 
 #[derive(Serial, Deserial, SchemaType)]

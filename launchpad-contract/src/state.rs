@@ -1,7 +1,7 @@
-use concordium_cis2::TokenAmountU64;
+use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, HashMap, SchemaType, Serial,
-    Serialize, StateApi, StateBuilder, StateMap, Timestamp,
+    Serialize, StateApi, StateBuilder, StateMap, StateRefMut, Timestamp,
 };
 use twox_hash::xxh3::hash64;
 
@@ -9,12 +9,6 @@ use crate::{errors::LaunchPadError, params::CreateParams};
 
 /// Launch-pad unique ID generated from product name
 pub type LaunchPadID = u64;
-
-/// AccountID is a base58 encoded string from raw bytes of account address
-pub type AccountID = String;
-
-/// Alias for `TokenAmountU64`
-pub type TokenAmount = TokenAmountU64;
 
 /// Alias which keeps track of release cycles
 pub type CycleCount = u8;
@@ -46,6 +40,29 @@ impl State {
     pub fn registeration_fee(&self) -> Amount {
         self.admin.registeration_fee
     }
+
+    /// Gets the platform admin account address
+    ///
+    /// Resturns the `AccountAddress` type
+    pub fn admin_address(&self) -> AccountAddress {
+        self.admin.address
+    }
+
+    /// Gets the `LaunchPad` by product name.
+    ///
+    /// Returns `LaunchPadError` if the LaunchPad does not exist.
+    pub fn get_launchpad(
+        &mut self,
+        product_name: String,
+    ) -> Result<StateRefMut<'_, LaunchPad, StateApi>, LaunchPadError> {
+        let launch_pad_id = hash64(product_name.as_bytes());
+
+        if let Some(launchpad) = self.launchpads.get_mut(&launch_pad_id) {
+            return Ok(launchpad);
+        }
+
+        Err(LaunchPadError::LaunchPadNotFound)
+    }
 }
 
 #[derive(Serial, DeserialWithState, Debug)]
@@ -53,13 +70,14 @@ impl State {
 pub struct LaunchPad<S = StateApi> {
     /// Product for which the presale is going to be established
     pub product: Product,
-    /// Timeperiod of a launch-pad until it's expiry
+    /// Timeperiod of a launch-pad until it's expiry, in other words
+    /// it defines the duration or vesting period
     pub timeperiod: TimePeriod,
     /// Property which holds the status if the launchpad
     /// is `Live`, `paused`, `canceled` or `completed`
     pub status: LaunchPadStatus,
     /// Holds the details if the launchpad is paused
-    pub pause: Option<PauseDetails>,
+    pub pause: PauseDetails,
     /// Minimum limit of investment to reach before the
     /// launchpad expires
     pub soft_cap: Amount,
@@ -93,13 +111,13 @@ impl LaunchPad {
             Self {
                 product: params.product,
                 timeperiod: params.timeperiod,
-                status: LaunchPadStatus::INREVIEW,
-                pause: None,
                 soft_cap: params.soft_cap,
                 hard_cap: params.hard_cap,
-                collected: Amount::zero(),
-                holders: state_builder.new_map(),
                 vest_limits: params.vest_limits,
+                holders: state_builder.new_map(),
+                status: LaunchPadStatus::INREVIEW,
+                pause: PauseDetails::default(),
+                collected: Amount::zero(),
                 lock_up: Lockup {
                     cliff: params.lockup_details.cliff,
                     release_cycles: params.lockup_details.release_cycles,
@@ -109,28 +127,68 @@ impl LaunchPad {
             },
         )
     }
-}
 
-/// Defines the duration interval of a Launch-pad during
-/// which the Launch-pad remains active for presale
-#[derive(Serialize, SchemaType, Clone, Debug)]
-pub struct TimePeriod {
-    /// Starting time of a launch-pad
-    pub start: Timestamp,
-    /// Ending time of a launch-pad
-    pub end: Timestamp,
-}
-
-impl TimePeriod {
-    /// Ensure whether the time period given is within the
-    /// valid realistic range
+    /// Getter method to get the CIS2 contract address related to
+    /// a current launch-pad.
     ///
-    /// Returns `Ok()` or else `VestingError`
-    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), LaunchPadError> {
-        if self.start >= self.end && self.end <= current {
-            return Err(LaunchPadError::InCorrectTimePeriod);
-        }
-        Ok(())
+    /// Returns `ContractAddress`
+    pub fn get_cis2_contract(&self) -> ContractAddress {
+        self.product.cis2_contract
+    }
+
+    /// Getter method to get the amount of tokens listed for presale
+    /// in current launch-pad.
+    ///
+    /// Returns `TokenAmount`
+    pub fn get_product_token_amount(&self) -> TokenAmount {
+        self.product.token_amount
+    }
+
+    /// Getter method to get the CIS2 token ID of tokens listed for
+    /// presale in current launch-pad.
+    ///
+    /// Returns `TokenID`
+    pub fn get_product_token_id(&self) -> TokenID {
+        self.product.token_id
+    }
+
+    /// Getter method to get the owner account address of the  
+    /// product in current launch-pad.
+    ///
+    /// Returns `AccountAddress`
+    pub fn get_product_owner(&self) -> AccountAddress {
+        self.product.owner
+    }
+
+    /// Get whether the launch-pad is live or not
+    /// 
+    /// Returns `ture` if live
+    pub fn is_live(&self) -> bool {
+        self.status == LaunchPadStatus::LIVE
+    }
+
+    /// Get whether the launch-pad is paused or not
+    /// 
+    /// Returns `ture` if paused
+    pub fn is_paused(&self) -> bool {
+        self.status == LaunchPadStatus::PAUSED
+    }
+
+    /// Get whether the launch-pad is live of Paused
+    /// 
+    /// Returns `ture` if live
+    pub fn current_pause_count(&self) -> u8 {
+        self.pause.count
+    }
+
+    /// Checks if the vesting time is finished
+    pub fn is_vesting_finished(&self, current: Timestamp) -> bool {
+        self.timeperiod.end < current
+    }
+
+    /// Checks if the pause duration has elapsed
+    pub fn is_pause_elapsed(&self, current: Timestamp) -> bool {
+        self.pause.timeperiod.is_elapsed(current)
     }
 }
 
@@ -156,9 +214,11 @@ pub struct Product {
     pub token_price: u32,
     /// Address of the CIS2 contract
     pub cis2_contract: ContractAddress,
+    /// On chain token identifier in CIS2 contract
+    pub token_id: TokenID,
 }
 
-#[derive(Serialize, SchemaType, Clone, Debug)]
+#[derive(Serialize, SchemaType, Clone, Debug, PartialEq)]
 pub enum LaunchPadStatus {
     /// When launchpas is approved and published for investments
     LIVE,
@@ -167,6 +227,12 @@ pub enum LaunchPadStatus {
     /// When the launchpad is created and added in queue to be reviewed
     /// by an analyst before presale
     INREVIEW,
+    /// When the Launch-pad is approved by analyst and now allowed to be
+    /// listed for presale
+    APPROVED,
+    /// When the Launch-pad is rejected by analyst and not allowed to be
+    /// listed for presale
+    REJECTED,
     /// When the launchpad is canceled by the owner or admin
     CANCELED,
     /// Once the launchpad has completed its cliff and vesting
@@ -192,7 +258,7 @@ pub type ReleaseData = HashMap<AccountAddress, (TokenAmount, Timestamp)>;
 #[derive(Serialize, SchemaType, Debug)]
 pub struct Lockup {
     /// Cliff period of the launchpad
-    pub cliff: Timestamp,
+    pub cliff: TimePeriod,
     /// Number of cycles in which the vesting will be released
     /// these cycles are based on number of months
     pub release_cycles: u8,
@@ -204,10 +270,74 @@ pub struct Lockup {
 
 #[derive(Serialize, SchemaType, Clone, Debug)]
 pub struct PauseDetails {
-    /// Pause period starting time
-    pub start: Timestamp,
-    /// Pause period ending time
-    pub until: Timestamp,
+    /// Pause duration, should be greater than min
+    /// pause duration 48 hrs
+    pub timeperiod: TimePeriod,
     /// How many times the launchpas has been paused
     pub count: u8,
+}
+
+/// Default trait implementation for PauseDetails type
+impl Default for PauseDetails {
+    fn default() -> Self {
+        Self {
+            timeperiod: TimePeriod::default(),
+            count: 0,
+        }
+    }
+}
+
+/// Defines the duration interval of a Launch-pad during
+/// which the Launch-pad remains active for presale
+#[derive(Serialize, SchemaType, Clone, Copy, Debug)]
+pub struct TimePeriod {
+    /// Starting time of a launch-pad
+    pub start: Timestamp,
+    /// Ending time of a launch-pad
+    pub end: Timestamp,
+}
+
+impl TimePeriod {
+    /// Ensure whether the time period given is within the
+    /// valid realistic range
+    ///
+    /// Returns `Ok()` or else `VestingError`
+    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), LaunchPadError> {
+        if self.start >= self.end && self.end <= current {
+            return Err(LaunchPadError::InCorrectTimePeriod);
+        }
+        Ok(())
+    }
+
+    /// Gives the duration of a time period between start and end
+    /// in milliseconds.
+    ///
+    /// Returns millis as `u64`
+    pub fn duration_as_millis(&self) -> u64 {
+        self.end.millis - self.start.millis
+    }
+
+    /// Returns the starting interval of a time period as `TimeStamp`
+    pub fn start(&self) -> Timestamp {
+        self.start
+    }
+
+    /// Returns the ending interval of a time period as `TimeStamp`
+    pub fn end(&self) -> Timestamp {
+        self.end
+    }
+
+    pub fn is_elapsed(&self, current: Timestamp) -> bool {
+        self.end < current
+    }
+}
+
+/// Default trait implementation for Timeperiod type
+impl Default for TimePeriod {
+    fn default() -> Self {
+        Self {
+            start: Timestamp::from(0),
+            end: Timestamp::from(0),
+        }
+    }
 }

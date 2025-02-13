@@ -40,5 +40,29 @@ pub enum LaunchPadError {
     HardcapNot40ToSoftcap,         // 32
     InCorrectTimePeriod,
     InCorrectCliffPeriod,
-    ProductNameAlreadyTaken
+    ProductNameAlreadyTaken,
+    OnlyAccount,
+    OnlyContract,
+    OnlyAdmin,
+    LaunchPadNotFound,
+    AmountTooLarge,
+    MissingAccount,
+    WrongContract,
+    WrongTokenAmount,
+    WrongTokenID,
+    UnAuthorized,
+    AlreadyPaused,
+    AlreadyLive,
+    TimeStillLeft,
+    PauseLimit,
+    PauseDuration,
+}
+
+impl From<TransferError> for LaunchPadError {
+    fn from(value: TransferError) -> Self {
+        match value {
+            TransferError::AmountTooLarge => Self::AmountTooLarge,
+            TransferError::MissingAccount => Self::MissingAccount
+        }
+    }
 }
