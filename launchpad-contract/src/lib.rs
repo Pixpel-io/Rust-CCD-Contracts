@@ -4,21 +4,23 @@ use concordium_cis2::{
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
     ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata, HasCommonData,
-    HasHost, HasInitContext, HasReceiveContext, HasStateApi, HasStateEntry, Host, InitContext,
-    InitResult, ParseError, ReceiveContext, Reject, Serial, StateBuilder, Timestamp, UnwrapAbort,
-    Write,
+    HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi, HasStateEntry, Host,
+    InitContext, InitResult, Logger, ParseError, ReceiveContext, Reject, Serial, StateBuilder,
+    Timestamp, UnwrapAbort, Write,
 };
 use errors::LaunchPadError;
+use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
 use params::{ApprovalParams, CreateParams, InitParams, LivePauseParams};
 use state::{LaunchPad, LaunchPadStatus, State, TimePeriod};
 use types::ContractResult;
 
-pub mod contract;
-pub mod errors;
-pub mod params;
-pub mod response;
-pub mod state;
-pub mod types;
+mod contract;
+mod errors;
+mod events;
+mod params;
+mod response;
+mod state;
+mod types;
 
 #[cfg(test)]
 mod tests;
@@ -64,12 +66,14 @@ fn init(ctx: &InitContext, state_builder: &mut StateBuilder) -> InitResult<State
     mutable,
     parameter = "CreateParams",
     error = "LaunchPadError",
+    enable_logger,
     payable
 )]
 fn create_launchpad(
     ctx: &ReceiveContext,
     host: &mut Host<State>,
     amount: Amount,
+    logger: &mut Logger,
 ) -> ContractResult<()> {
     // Ensure that the sender is an account.
     ensure!(ctx.sender().is_account(), LaunchPadError::OnlyAccount);
@@ -116,8 +120,17 @@ fn create_launchpad(
         Entry::Occupied(_) => {
             bail!(LaunchPadError::ProductNameAlreadyTaken)
         }
-        // Or else it will insert the launch-pad
+        // Or else it will insert the launch-pad in State and
+        // dispatch the launch pad creation event
         Entry::Vacant(entry) => {
+            logger.log(&Event::CREATED(CreateLaunchPadEvent {
+                launchpad_id,
+                launchpad_name: launchpad.product_name(),
+                owner: launchpad.get_product_owner(),
+                allocated_tokens: launchpad.get_product_token_amount(),
+                base_price: launchpad.product_base_price(),
+            }))?;
+
             entry.insert(launchpad);
         }
     };
@@ -133,9 +146,14 @@ fn create_launchpad(
     name = "ApproveLaunchPad",
     mutable,
     parameter = "ApprovalParams",
-    error = "LaunchPadError"
+    error = "LaunchPadError",
+    enable_logger
 )]
-fn approve_launchpad(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
+fn approve_launchpad(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
+    logger: &mut Logger,
+) -> ContractResult<()> {
     // Ensure that the sender is an account.
     ensure!(ctx.sender().is_account(), LaunchPadError::OnlyAccount);
 
@@ -151,11 +169,16 @@ fn approve_launchpad(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRe
 
     // Getting the launch-pad to be approved and updating its
     // status to LIVE
-    let mut launchpad = host.state_mut().get_launchpad(params.product_name)?;
+    let (launch_pad_id, mut launchpad) = host.state_mut().get_launchpad(params.product_name)?;
 
     if params.approve {
         // Updating the launch-pad status to approved
         launchpad.status = LaunchPadStatus::APPROVED;
+
+        logger.log(&Event::APPROVED(ApproveEvent {
+            launchpad_id: launch_pad_id,
+            launchpad_name: launchpad.product_name(),
+        }))?;
 
         drop(launchpad);
 
@@ -171,6 +194,12 @@ fn approve_launchpad(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRe
     // Updating the launch-pad status to rejected if analyst
     // has rejected the launchpad
     launchpad.status = LaunchPadStatus::REJECTED;
+
+    logger.log(&Event::REJECTED(RejectEvent {
+        launchpad_id: launch_pad_id,
+        launchpad_name: launchpad.product_name(),
+    }))?;
+
     let owner = launchpad.get_product_owner();
 
     drop(launchpad);
@@ -187,9 +216,10 @@ fn approve_launchpad(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractRe
     name = "Deposit",
     mutable,
     parameter = "OnReceiveCIS2Params",
-    error = "LaunchPadError"
+    error = "LaunchPadError",
+    enable_logger
 )]
-fn deposit_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
+fn deposit_tokens(ctx: &ReceiveContext, host: &mut Host<State>, logger: &mut Logger) -> ContractResult<()> {
     // This entry point is only meant to be invoked by CIS2 contract
     // given by the product owner in launch-pad params
     let contract = match ctx.sender() {
@@ -209,7 +239,7 @@ fn deposit_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResul
 
     // Fetching the launch-pad from the state if the correct
     // product name is supplied
-    let mut launchpad = host.state_mut().get_launchpad(data)?;
+    let (launch_pad_id, mut launchpad) = host.state_mut().get_launchpad(data)?;
 
     // Making sure that the deposit is made by the product
     // owner
@@ -241,6 +271,15 @@ fn deposit_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResul
     // for the current product
     launchpad.status = LaunchPadStatus::LIVE;
 
+    // Dispatching the event as notification when the vesting start
+    // as soon as the allocated tokens are deposited
+    logger.log(&Event::VESTINGSTARTED(VestEvent{
+        launchpad_id: launch_pad_id,
+        launchpad_name: launchpad.product_name(),
+        vesting_time: launchpad.timeperiod,
+        vesting_limits: launchpad.vest_limits.clone()
+    }))?;
+
     Ok(())
 }
 
@@ -259,7 +298,7 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     let params: LivePauseParams = ctx.parameter_cursor().get()?;
 
     // Getting the launch pad from state identified by the product name
-    let mut launchpad = host.state_mut().get_launchpad(params.poduct_name)?;
+    let (_, mut launchpad) = host.state_mut().get_launchpad(params.poduct_name)?;
 
     // Product owner (developer) is only allowed to pause
     // the launch pad

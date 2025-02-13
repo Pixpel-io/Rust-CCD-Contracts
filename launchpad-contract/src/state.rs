@@ -5,13 +5,15 @@ use concordium_std::{
 };
 use twox_hash::xxh3::hash64;
 
-use crate::{errors::LaunchPadError, params::CreateParams};
+use crate::{errors::LaunchPadError, params::CreateParams, ProductName};
 
 /// Launch-pad unique ID generated from product name
 pub type LaunchPadID = u64;
 
 /// Alias which keeps track of release cycles
 pub type CycleCount = u8;
+
+pub type LaunchPadState<'a> = StateRefMut<'a, LaunchPad, StateApi>;
 
 /// The state of the smart contract.
 /// This state can be viewed by querying the node with the command
@@ -48,17 +50,17 @@ impl State {
         self.admin.address
     }
 
-    /// Gets the `LaunchPad` by product name.
+    /// Gets the `LaunchPad` by product name with its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
     pub fn get_launchpad(
         &mut self,
         product_name: String,
-    ) -> Result<StateRefMut<'_, LaunchPad, StateApi>, LaunchPadError> {
+    ) -> Result<(LaunchPadID, LaunchPadState<'_>), LaunchPadError> {
         let launch_pad_id = hash64(product_name.as_bytes());
 
         if let Some(launchpad) = self.launchpads.get_mut(&launch_pad_id) {
-            return Ok(launchpad);
+            return Ok((launch_pad_id, launchpad));
         }
 
         Err(LaunchPadError::LaunchPadNotFound)
@@ -190,6 +192,14 @@ impl LaunchPad {
     pub fn is_pause_elapsed(&self, current: Timestamp) -> bool {
         self.pause.timeperiod.is_elapsed(current)
     }
+
+    pub fn product_base_price(&self) -> Amount {
+        self.product.token_price
+    }
+
+    pub fn product_name(&self) -> ProductName {
+        self.product.name.clone()
+    }
 }
 
 /// Defines the upper and lower bound limits for vesting.
@@ -211,7 +221,7 @@ pub struct Product {
     /// Amount of tokens list for presale
     pub token_amount: TokenAmount,
     /// Per token price decided by the owner for presale
-    pub token_price: u32,
+    pub token_price: Amount,
     /// Address of the CIS2 contract
     pub cis2_contract: ContractAddress,
     /// On chain token identifier in CIS2 contract
@@ -248,7 +258,10 @@ pub struct Admin {
     registeration_fee: Amount,
     /// A certain percentage of shares to be paid by product
     /// once the soft-cap is reached
-    token_allocation_cut: u8,
+    allocation_share: u8,
+    /// A certain percentage from LP tokens will be charged 
+    /// by the platform
+    liquidity_share: u8,
 }
 
 /// Alias to hold details regarding vesting releases in each

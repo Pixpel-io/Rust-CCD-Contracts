@@ -56,6 +56,8 @@ pub enum LaunchPadError {
     TimeStillLeft,
     PauseLimit,
     PauseDuration,
+    LogFull,
+    LogMalformed
 }
 
 impl From<TransferError> for LaunchPadError {
@@ -64,5 +66,14 @@ impl From<TransferError> for LaunchPadError {
             TransferError::AmountTooLarge => Self::AmountTooLarge,
             TransferError::MissingAccount => Self::MissingAccount
         }
+    }
+}
+
+impl From<LogError> for LaunchPadError {
+    fn from(value: LogError) -> Self {
+        match value {
+            LogError::Full => Self::LogFull,
+            LogError::Malformed => Self::LogMalformed
+        }   
     }
 }
