@@ -1,7 +1,8 @@
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_std::{
-    AccountAddress, Amount, ContractAddress, DeserialWithState, HashMap, SchemaType, Serial,
-    Serialize, StateApi, StateBuilder, StateMap, StateRefMut, Timestamp,
+    AccountAddress, Amount, ContractAddress, DeserialWithState, HasChainMetadata, HasCommonData,
+    HashMap, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder, StateMap,
+    StateRefMut, Timestamp,
 };
 use twox_hash::xxh3::hash64;
 
@@ -10,9 +11,7 @@ use crate::{errors::LaunchPadError, params::CreateParams, ProductName};
 /// Launch-pad unique ID generated from product name
 pub type LaunchPadID = u64;
 
-/// Alias which keeps track of release cycles
-pub type CycleCount = u8;
-
+/// Alias for mutable state reference of a `LaunchPad` type
 pub type LaunchPadState<'a> = StateRefMut<'a, LaunchPad, StateApi>;
 
 /// The state of the smart contract.
@@ -39,7 +38,7 @@ impl State {
     /// for launch-pad creation
     ///
     /// Returns `Amount` in CCD
-    pub fn registeration_fee(&self) -> Amount {
+    pub fn admin_registeration_fee(&self) -> Amount {
         self.admin.registeration_fee
     }
 
@@ -48,6 +47,14 @@ impl State {
     /// Resturns the `AccountAddress` type
     pub fn admin_address(&self) -> AccountAddress {
         self.admin.address
+    }
+
+    pub fn admin_allocation_share(&self) -> u64 {
+        self.admin.allocation_share()
+    }
+
+    pub fn admin_liquidity_share(&self) -> u64 {
+        self.admin.liquidity_share()
     }
 
     /// Gets the `LaunchPad` by product name with its associative ID
@@ -61,6 +68,21 @@ impl State {
 
         if let Some(launchpad) = self.launchpads.get_mut(&launch_pad_id) {
             return Ok((launch_pad_id, launchpad));
+        }
+
+        Err(LaunchPadError::LaunchPadNotFound)
+    }
+
+    /// Gets the `LaunchPad` by its associative ID
+    ///
+    /// Returns `LaunchPadError` if the LaunchPad does not exist.
+    pub fn get_launchpad_by_id(
+        &mut self,
+        id: u64,
+    ) -> Result<LaunchPadState<'_>, LaunchPadError> {
+
+        if let Some(launchpad) = self.launchpads.get_mut(&id) {
+            return Ok(launchpad);
         }
 
         Err(LaunchPadError::LaunchPadNotFound)
@@ -91,12 +113,16 @@ pub struct LaunchPad<S = StateApi> {
     pub collected: Amount,
     /// List of investors with their associated invested
     /// amount in CCD
-    pub holders: StateMap<AccountAddress, Amount, S>,
+    pub holders: StateMap<AccountAddress, (Amount, TokenAmount), S>,
     /// Defines the maximum and minimum investment amounts acceptable
     /// for presale
     pub vest_limits: VestingLimits,
     /// Details regarding the presale lock-up
     pub lock_up: Lockup,
+    /// Keeps track if the allocation share is paid
+    pub allocation_paid: bool,
+    /// Keeps track if the liquidity share is paid
+    pub liquidity_paid: bool,
 }
 
 impl LaunchPad {
@@ -126,6 +152,8 @@ impl LaunchPad {
                     cycles_rolled: 0,
                     cycle_details: Vec::new(),
                 },
+                allocation_paid: false,
+                liquidity_paid: false
             },
         )
     }
@@ -143,7 +171,7 @@ impl LaunchPad {
     ///
     /// Returns `TokenAmount`
     pub fn get_product_token_amount(&self) -> TokenAmount {
-        self.product.token_amount
+        self.product.allocated_tokens
     }
 
     /// Getter method to get the CIS2 token ID of tokens listed for
@@ -163,34 +191,45 @@ impl LaunchPad {
     }
 
     /// Get whether the launch-pad is live or not
-    /// 
+    ///
     /// Returns `ture` if live
     pub fn is_live(&self) -> bool {
         self.status == LaunchPadStatus::LIVE
     }
 
     /// Get whether the launch-pad is paused or not
-    /// 
+    ///
     /// Returns `ture` if paused
     pub fn is_paused(&self) -> bool {
         self.status == LaunchPadStatus::PAUSED
     }
 
     /// Get whether the launch-pad is live of Paused
-    /// 
+    ///
     /// Returns `ture` if live
     pub fn current_pause_count(&self) -> u8 {
         self.pause.count
     }
 
-    /// Checks if the vesting time is finished
-    pub fn is_vesting_finished(&self, current: Timestamp) -> bool {
-        self.timeperiod.end < current
+    /// Checks if the vesting is completed, by checking whether
+    ///
+    /// - Vesting duration has been elapsed
+    /// - or product hard cap has been reached
+    ///
+    /// Returns `true` if any of the above statement is true
+    pub fn is_finished(&self, ctx: &ReceiveContext) -> bool {
+        let hard_cap_reached = self.hard_cap.map_or(false, |hc| self.collected >= hc);
+
+        self.timeperiod.end < ctx.metadata().block_time() || hard_cap_reached
     }
 
     /// Checks if the pause duration has elapsed
     pub fn is_pause_elapsed(&self, current: Timestamp) -> bool {
         self.pause.timeperiod.is_elapsed(current)
+    }
+
+    pub fn is_canceled(&self) -> bool {
+        self.status == LaunchPadStatus::CANCELED
     }
 
     pub fn product_base_price(&self) -> Amount {
@@ -200,6 +239,18 @@ impl LaunchPad {
     pub fn product_name(&self) -> ProductName {
         self.product.name.clone()
     }
+
+    pub fn vest_min(&self) -> TokenAmount {
+        self.vest_limits.min
+    }
+
+    pub fn vest_max(&self) -> TokenAmount {
+        self.vest_limits.max
+    }
+
+    pub fn reached_soft_cap(&self) -> bool {
+        self.collected >= self.soft_cap
+    }
 }
 
 /// Defines the upper and lower bound limits for vesting.
@@ -207,9 +258,9 @@ impl LaunchPad {
 #[derive(Serialize, SchemaType, Clone, Debug)]
 pub struct VestingLimits {
     /// Minimum amount in CCD acceptable for investment
-    pub min: Amount,
+    pub min: TokenAmount,
     /// Maximum amount in CCD acceptable for investment
-    pub max: Amount,
+    pub max: TokenAmount,
 }
 
 #[derive(Serialize, SchemaType, Clone, Debug)]
@@ -219,7 +270,7 @@ pub struct Product {
     /// Address of the product owner
     pub owner: AccountAddress,
     /// Amount of tokens list for presale
-    pub token_amount: TokenAmount,
+    pub allocated_tokens: TokenAmount,
     /// Per token price decided by the owner for presale
     pub token_price: Amount,
     /// Address of the CIS2 contract
@@ -249,6 +300,7 @@ pub enum LaunchPadStatus {
     COMPLETED,
 }
 
+
 #[derive(Serialize, SchemaType, Clone, Debug)]
 pub struct Admin {
     /// Admin account address to which all the fee
@@ -257,11 +309,25 @@ pub struct Admin {
     /// Platform registeration fee to be paid by product
     registeration_fee: Amount,
     /// A certain percentage of shares to be paid by product
-    /// once the soft-cap is reached
-    allocation_share: u8,
-    /// A certain percentage from LP tokens will be charged 
+    /// once the soft-cap is reached in Tokens
+    allocation_share: u64,
+    /// A certain percentage from LP tokens will be charged
     /// by the platform
-    liquidity_share: u8,
+    liquidity_share: u64,
+}
+
+impl Admin {
+    pub fn registeration_fee(&self) -> Amount {
+        self.registeration_fee
+    }
+
+    pub fn allocation_share(&self) -> u64 {
+        self.allocation_share
+    }
+
+    pub fn liquidity_share(&self) -> u64 {
+        self.liquidity_share
+    }
 }
 
 /// Alias to hold details regarding vesting releases in each

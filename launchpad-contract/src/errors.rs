@@ -1,3 +1,4 @@
+use concordium_cis2::{Cis2ClientError, Cis2Error};
 /// The different errors that the `vote` function can produce.
 use concordium_std::*;
 
@@ -15,7 +16,7 @@ pub enum LaunchPadError {
     NotOwner,                      // 7
     NotLive,                       // 8
     UserNotExist,                  // 9
-    InsuffiecienRegFee,            // 10
+    InSufficientAmount,            // 10
     MinimumInvestmentNotSatisfied, // 11
     LaunchReachedToMaximum,        // 12
     HardcapLimitReached,           // 13
@@ -51,13 +52,22 @@ pub enum LaunchPadError {
     WrongTokenAmount,
     WrongTokenID,
     UnAuthorized,
-    AlreadyPaused,
-    AlreadyLive,
+    IsPaused,
+    IsLive,
+    IsCanceled,
     TimeStillLeft,
     PauseLimit,
     PauseDuration,
     LogFull,
-    LogMalformed
+    LogMalformed,
+    VestLimit,
+    SoftReached,
+    InvalidResponse,
+    MissingContract,
+    MissingEntrypoint,
+    MessageFailed,
+    LogicReject,
+    Trap
 }
 
 impl From<TransferError> for LaunchPadError {
@@ -75,5 +85,34 @@ impl From<LogError> for LaunchPadError {
             LogError::Full => Self::LogFull,
             LogError::Malformed => Self::LogMalformed
         }   
+    }
+}
+
+/// Mapping Cis2ClientError<Error> to Error.
+impl From<Cis2ClientError<LaunchPadError>> for LaunchPadError {
+    fn from(e: Cis2ClientError<LaunchPadError>) -> Self {
+        match e {
+            Cis2ClientError::InvokeContractError(err) => err.into(),
+            Cis2ClientError::ParseResult => Self::ParseResult,
+            Cis2ClientError::InvalidResponse => Self::InvalidResponse,
+        }
+    }
+}
+
+/// Mapping CallContractError<ExternCallResponse> to Error.
+impl From<CallContractError<Cis2Error<LaunchPadError>>> for LaunchPadError {
+    fn from(e: CallContractError<Cis2Error<LaunchPadError>>) -> Self {
+        match e {
+            CallContractError::AmountTooLarge => Self::AmountTooLarge,
+            CallContractError::MissingAccount => Self::MissingAccount,
+            CallContractError::MissingContract => Self::MissingContract,
+            CallContractError::MissingEntrypoint => Self::MissingEntrypoint,
+            CallContractError::MessageFailed => Self::MessageFailed,
+            CallContractError::LogicReject {
+                reason: _,
+                return_value: _,
+            } => Self::LogicReject,
+            CallContractError::Trap => Self::Trap,
+        }
     }
 }

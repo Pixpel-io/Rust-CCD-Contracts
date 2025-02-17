@@ -1,16 +1,18 @@
+use std::vec;
+
 use concordium_cis2::{
-    Cis2Client, OnReceivingCis2DataParams, TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID,
+    AdditionalData, Cis2Client, OnReceivingCis2DataParams, Receiver, TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID, Transfer
 };
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
     ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata, HasCommonData,
     HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi, HasStateEntry, Host,
     InitContext, InitResult, Logger, ParseError, ReceiveContext, Reject, Serial, StateBuilder,
-    Timestamp, UnwrapAbort, Write,
+    UnwrapAbort, Write,
 };
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
-use params::{ApprovalParams, CreateParams, InitParams, LivePauseParams};
+use params::{ApprovalParams, CreateParams, InitParams, LivePauseParams, VestParams};
 use state::{LaunchPad, LaunchPadStatus, State, TimePeriod};
 use types::ContractResult;
 
@@ -38,6 +40,7 @@ const MIN_PAUSE_DURATION: u64 = 1.728e+8 as u64;
 /// Launch-Pad can only be pause at most three times
 const MAX_PAUSE_COUNT: u8 = 3;
 
+/// Alias for OnReceiveCIS2 hook params
 type OnReceiveCIS2Params = OnReceivingCis2DataParams<TokenID, TokenAmount, ProductName>;
 
 /// Entry point which initializes the contract with new default state.
@@ -86,8 +89,8 @@ fn create_launchpad(
 
     // Esnure that user pays the complete registeration Fee
     ensure!(
-        amount >= host.state().registeration_fee(),
-        LaunchPadError::InsuffiecienRegFee
+        amount >= host.state().admin_registeration_fee(),
+        LaunchPadError::InSufficientAmount
     );
 
     // Ensure hard-cap is greater than the soft-cap
@@ -185,7 +188,7 @@ fn approve_launchpad(
         // Transfering the registeration fee to platform
         host.invoke_transfer(
             &host.state().admin_address(),
-            host.state().registeration_fee(),
+            host.state().admin_registeration_fee(),
         )?;
 
         return Ok(());
@@ -206,7 +209,7 @@ fn approve_launchpad(
 
     // Refunding the product owner in case if the launch-pad
     // is rejected
-    host.invoke_transfer(&owner, host.state().registeration_fee())?;
+    host.invoke_transfer(&owner, host.state().admin_registeration_fee())?;
 
     Ok(())
 }
@@ -219,7 +222,11 @@ fn approve_launchpad(
     error = "LaunchPadError",
     enable_logger
 )]
-fn deposit_tokens(ctx: &ReceiveContext, host: &mut Host<State>, logger: &mut Logger) -> ContractResult<()> {
+fn deposit_tokens(
+    ctx: &ReceiveContext,
+    host: &mut Host<State>,
+    logger: &mut Logger,
+) -> ContractResult<()> {
     // This entry point is only meant to be invoked by CIS2 contract
     // given by the product owner in launch-pad params
     let contract = match ctx.sender() {
@@ -273,11 +280,11 @@ fn deposit_tokens(ctx: &ReceiveContext, host: &mut Host<State>, logger: &mut Log
 
     // Dispatching the event as notification when the vesting start
     // as soon as the allocated tokens are deposited
-    logger.log(&Event::VESTINGSTARTED(VestEvent{
+    logger.log(&Event::VESTINGSTARTED(VestEvent {
         launchpad_id: launch_pad_id,
         launchpad_name: launchpad.product_name(),
         vesting_time: launchpad.timeperiod,
-        vesting_limits: launchpad.vest_limits.clone()
+        vesting_limits: launchpad.vest_limits.clone(),
     }))?;
 
     Ok(())
@@ -307,16 +314,15 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
         LaunchPadError::UnAuthorized
     );
 
-    // Launch pad can only be pause during vesting
-    ensure!(
-        launchpad.is_vesting_finished(ctx.metadata().block_time()),
-        LaunchPadError::VestingFinished
-    );
+    // Launch pad can only be pause during vesting or before
+    // reaching the soft cap
+    ensure!(launchpad.reached_soft_cap(), LaunchPadError::SoftReached);
+    ensure!(launchpad.is_finished(ctx), LaunchPadError::VestingFinished);
 
     // Check if owner wants to pause the launch pad
     if params.to_pause {
         // Check if the launch pad is already paused
-        ensure!(launchpad.is_live(), LaunchPadError::AlreadyPaused);
+        ensure!(launchpad.is_live(), LaunchPadError::IsPaused);
         // Check if the pause limit reached, launch pad is allowed
         // to be paused 3 times
         ensure!(
@@ -340,7 +346,7 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     }
 
     // Whether the launch-pad is already live
-    ensure!(launchpad.is_paused(), LaunchPadError::AlreadyLive);
+    ensure!(launchpad.is_paused(), LaunchPadError::IsLive);
     // Check if the time is still left for pause duration
     // to complete
     ensure!(
@@ -352,6 +358,136 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     launchpad.status = LaunchPadStatus::LIVE;
     // Resetting the pause durations
     launchpad.pause.timeperiod = TimePeriod::default();
+
+    Ok(())
+}
+
+#[receive(
+    contract = "LaunchPad",
+    name = "Vest",
+    mutable,
+    parameter = "VestParams",
+    error = "LaunchPadError",
+    payable
+)]
+fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> ContractResult<()> {
+    // Only Account is supposed to invoke this method
+    let holder = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+    };
+
+    // Reading parameters
+    let params: VestParams = ctx.parameter_cursor().get()?;
+
+    // Getting the launch pad from state identified by the product name
+    let (launch_pad_id, mut launchpad) = host.state_mut().get_launchpad(params.product_name)?;
+
+    // Make sure that the launch pad is not paused, is not canceled
+    // or is not finished, either due to vesting duration elapsed or
+    // due to hard cap limit reached
+    ensure!(launchpad.is_paused(), LaunchPadError::IsPaused);
+    ensure!(launchpad.is_canceled(), LaunchPadError::IsCanceled);
+    ensure!(launchpad.is_finished(ctx), LaunchPadError::VestingFinished);
+
+    // Verify whether the payable vesting amount received is within the
+    // min and max vesting allowed
+    ensure!(
+        params.token_amount >= launchpad.vest_min() && params.token_amount <= launchpad.vest_max(),
+        LaunchPadError::InSufficientAmount
+    );
+
+    let vest_max = launchpad.vest_max();
+
+    // Updating or inserting the holder(investor) depending whether the
+    // holder is new or existing in the launch pad state
+    match launchpad.holders.entry(holder) {
+        // If holder is new to the launch pad, insert him to
+        // the holders list along with his invested amount 
+        // and claimable tokens
+        Entry::Vacant(entry) => {
+            entry.insert((amount, params.token_amount));
+        }
+        // If holder already exist in the launch pad, then 
+        // just update it's previous amount and claimable 
+        // tokens.
+        Entry::Occupied(mut entry) => {
+            let _ = entry.modify(|(pre_amount, pre_tokens)| {
+                // Ensure that holder does not exceeds the max vesting 
+                // limit allowed
+                ensure!(
+                    *pre_tokens + params.token_amount < vest_max,
+                    LaunchPadError::VestLimit
+                );
+                *pre_amount += amount;
+                *pre_tokens += params.token_amount;
+
+                Ok(())
+            });
+        }
+    }
+
+    // Updating the collected investment so far by the product
+    launchpad.collected += amount;
+
+    // Get the amount of tokens allocated for presale by the owner
+    let allocated_tokens = launchpad.product.allocated_tokens;
+    // Check if the product has acheived soft cap
+    let reached_soft_cap = launchpad.reached_soft_cap();
+    // Check if the product has paid the soft cap share to the platform
+    let allocation_paid = launchpad.allocation_paid;
+    
+    drop(launchpad);
+
+    // This is where the allocation share is transfered to the platform admin.
+    // Allocation share is paid only once, if the product has just reached the
+    // soft cap and the share is not yet paid.
+    //
+    // Allocation share is paid in terms of perecentile amount of tokens from the
+    // product ICO (initial coin offering)
+    if reached_soft_cap && !allocation_paid {
+        let allocated_cut = allocated_tokens * host.state().admin_allocation_share();
+        let admin_address = host.state().admin_address();
+        let mut launchpad = host.state_mut().get_launchpad_by_id(launch_pad_id)?;
+        let token_id = launchpad.get_product_token_id();
+
+        let cis2_client = Cis2Client::new(launchpad.get_cis2_contract());
+
+        launchpad.allocation_paid = true;
+        launchpad.product.allocated_tokens -= allocated_cut;
+    
+        drop(launchpad);
+
+        // Transfering the calculated amount of product tokens
+        // as allocated cut based on the allocation share percent
+        // to the platform admin.
+        cis2_client.transfer(host, Transfer {
+            token_id,
+            amount: allocated_cut,
+            from: ctx.self_address().into(),
+            to: admin_address.into(),
+            data: AdditionalData::empty()
+        })?;
+    }
+
+    // Contract's core State maintains the list of all the holders(invesotrs)
+    // from every launch pad with their associated launch pads in which they
+    // are contributing. There may be more than one launch pad for a single
+    // holder.
+    match host.state_mut().investors.entry(holder) {
+        // Insert the new holder to the state with launch pad ID
+        Entry::Vacant(entry) => {
+            entry.insert(vec![launch_pad_id]);
+        }
+        // Update the existing holder in the state with launch pad ID
+        Entry::Occupied(mut entry) => {
+            entry.modify(|launchpads| {
+                if !launchpads.contains(&launch_pad_id) {
+                    launchpads.push(launch_pad_id);
+                }
+            });
+        }
+    }
 
     Ok(())
 }

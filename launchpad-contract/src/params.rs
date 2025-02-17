@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::{state::{Admin, Product, TimePeriod, VestingLimits}, types::*, ProductName};
+use crate::{state::{Admin, Product, TimePeriod, VestingLimits, LaunchPadID}, types::*, ProductName};
+use concordium_cis2::TokenAmountU64 as TokenAmount;
 use concordium_std::*;
 
 /// Contract initialization parameters to be passed at the time
@@ -113,8 +114,8 @@ pub struct LaunchpadParam {
 
 #[derive(Serialize, SchemaType)]
 pub struct VestParams {
-    pub launchpad_id: LaunchpadID,
-    pub token_amount: u64,
+    pub product_name: ProductName,
+    pub token_amount: TokenAmount,
 }
 
 #[derive(Serialize, SchemaType, Clone)]
@@ -124,13 +125,13 @@ pub struct TokenInfo {
 }
 #[derive(Serialize, SchemaType, Clone)]
 pub struct CancelParam {
-    pub launchpad_id: LaunchpadID,
+    pub launchpad_id: LaunchPadID,
     pub token: TokenInfo,
 }
 
 #[derive(Serialize, SchemaType, Clone)]
 pub struct WithdrawParam {
-    pub launchpad_id: LaunchpadID,
+    pub launchpad_id: LaunchPadID,
     pub token: TokenInfo,
     pub remaining_cis2_amount: ContractTokenAmount,
 }
