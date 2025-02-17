@@ -1,18 +1,25 @@
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_std::{
-    AccountAddress, Amount, ContractAddress, DeserialWithState, HasChainMetadata, HasCommonData,
-    HashMap, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder, StateMap,
-    StateRefMut, Timestamp,
+    AccountAddress, Amount, ContractAddress, DeserialWithState, Duration, HasChainMetadata,
+    HasCommonData, HashMap, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder,
+    StateMap, StateRef, StateRefMut, Timestamp,
 };
 use twox_hash::xxh3::hash64;
 
-use crate::{errors::LaunchPadError, params::CreateParams, ProductName};
+use crate::{
+    errors::LaunchPadError,
+    params::{CreateParams, Months},
+    ProductName,
+};
 
 /// Launch-pad unique ID generated from product name
 pub type LaunchPadID = u64;
 
 /// Alias for mutable state reference of a `LaunchPad` type
 pub type LaunchPadState<'a> = StateRefMut<'a, LaunchPad, StateApi>;
+
+/// Number of days in a month
+pub const DAYS: u64 = 31;
 
 /// The state of the smart contract.
 /// This state can be viewed by querying the node with the command
@@ -70,22 +77,18 @@ impl State {
             return Ok((launch_pad_id, launchpad));
         }
 
-        Err(LaunchPadError::LaunchPadNotFound)
+        Err(LaunchPadError::NotFound)
     }
 
     /// Gets the `LaunchPad` by its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
-    pub fn get_launchpad_by_id(
-        &mut self,
-        id: u64,
-    ) -> Result<LaunchPadState<'_>, LaunchPadError> {
-
+    pub fn get_launchpad_by_id(&mut self, id: u64) -> Result<LaunchPadState<'_>, LaunchPadError> {
         if let Some(launchpad) = self.launchpads.get_mut(&id) {
             return Ok(launchpad);
         }
 
-        Err(LaunchPadError::LaunchPadNotFound)
+        Err(LaunchPadError::NotFound)
     }
 }
 
@@ -113,7 +116,7 @@ pub struct LaunchPad<S = StateApi> {
     pub collected: Amount,
     /// List of investors with their associated invested
     /// amount in CCD
-    pub holders: StateMap<AccountAddress, (Amount, TokenAmount), S>,
+    pub holders: StateMap<AccountAddress, HolderInfo, S>,
     /// Defines the maximum and minimum investment amounts acceptable
     /// for presale
     pub vest_limits: VestingLimits,
@@ -134,6 +137,10 @@ impl LaunchPad {
         params: CreateParams,
         state_builder: &mut StateBuilder,
     ) -> (LaunchPadID, Self) {
+        let cliff = params
+            .launchpad_end_time()
+            .checked_add(Duration::from_days(params.lockup_details.cliff * DAYS))
+            .unwrap();
         (
             hash64(params.product.name.as_bytes()),
             Self {
@@ -147,13 +154,11 @@ impl LaunchPad {
                 pause: PauseDetails::default(),
                 collected: Amount::zero(),
                 lock_up: Lockup {
-                    cliff: params.lockup_details.cliff,
+                    cliff,
                     release_cycles: params.lockup_details.release_cycles,
-                    cycles_rolled: 0,
-                    cycle_details: Vec::new(),
                 },
                 allocation_paid: false,
-                liquidity_paid: false
+                liquidity_paid: false,
             },
         )
     }
@@ -214,13 +219,10 @@ impl LaunchPad {
     /// Checks if the vesting is completed, by checking whether
     ///
     /// - Vesting duration has been elapsed
-    /// - or product hard cap has been reached
     ///
     /// Returns `true` if any of the above statement is true
     pub fn is_finished(&self, ctx: &ReceiveContext) -> bool {
-        let hard_cap_reached = self.hard_cap.map_or(false, |hc| self.collected >= hc);
-
-        self.timeperiod.end < ctx.metadata().block_time() || hard_cap_reached
+        self.timeperiod.end > ctx.metadata().block_time()
     }
 
     /// Checks if the pause duration has elapsed
@@ -228,28 +230,73 @@ impl LaunchPad {
         self.pause.timeperiod.is_elapsed(current)
     }
 
+    /// Checks if the Launch pad is caneled
     pub fn is_canceled(&self) -> bool {
         self.status == LaunchPadStatus::CANCELED
     }
 
+    /// Returns the base price of allocated token for presale
+    /// in CCD.
     pub fn product_base_price(&self) -> Amount {
         self.product.token_price
     }
 
+    /// Returns the product name as `String`, for which the
+    /// launch pad is created for presale.
+    ///
+    /// In other words, product name can be think of a single
+    /// launch pad name for identification
     pub fn product_name(&self) -> ProductName {
         self.product.name.clone()
     }
 
+    /// Returns the min token amount acceptable for vesting
     pub fn vest_min(&self) -> TokenAmount {
         self.vest_limits.min
     }
 
+    /// Returns the max token amount acceptable for vesting
     pub fn vest_max(&self) -> TokenAmount {
         self.vest_limits.max
     }
 
+    /// Checks if the soft cap is reached
     pub fn reached_soft_cap(&self) -> bool {
         self.collected >= self.soft_cap
+    }
+
+    /// Checks if the cliff duration has elapsed
+    pub fn is_cliff_elapsed(&self, ctx: &ReceiveContext) -> bool {
+        self.lock_up.cliff > ctx.metadata().block_time()
+    }
+
+    /// Gets the immutable reference to holder information
+    /// releated to the launch pad.
+    ///
+    /// Returns `Ok()` if the holder exist or else returns `LaunchPadError`
+    pub fn get_holder_info(
+        &self,
+        holder: AccountAddress,
+    ) -> Result<StateRef<'_, HolderInfo>, LaunchPadError> {
+        if let Some(info) = self.holders.get(&holder) {
+            return Ok(info);
+        }
+
+        Err(LaunchPadError::WrongHolder)
+    }
+
+    /// Updates the release data related to a specific holder in the
+    /// launch pad.
+    pub fn set_holder_release_info(
+        &mut self,
+        holder: AccountAddress,
+        cycle: u8,
+        release_data: (TokenAmount, Timestamp),
+    ) {
+        let mut info = self.holders.get_mut(&holder).unwrap();
+
+        info.cycles_rolled = cycle;
+        let _ = info.release_data.insert(cycle, release_data);
     }
 }
 
@@ -300,7 +347,6 @@ pub enum LaunchPadStatus {
     COMPLETED,
 }
 
-
 #[derive(Serialize, SchemaType, Clone, Debug)]
 pub struct Admin {
     /// Admin account address to which all the fee
@@ -330,21 +376,39 @@ impl Admin {
     }
 }
 
-/// Alias to hold details regarding vesting releases in each
-/// release cycle rolled
-pub type ReleaseData = HashMap<AccountAddress, (TokenAmount, Timestamp)>;
+/// This type holds the information about a single holder and its
+/// contributions in the launch pad, along with the details regarding
+/// each release cycle related to the holder.
+#[derive(Serial, DeserialWithState, Debug)]
+#[concordium(state_parameter = "S")]
+pub struct HolderInfo<S = StateApi> {
+    /// Total amount of token bought by the holder
+    pub tokens: TokenAmount,
+    /// Total amount in CCD raised by the holder
+    pub invested: Amount,
+    /// How many release cycles have been claimed
+    /// by the holder
+    pub cycles_rolled: u8,
+    /// Release data regarding each cycle claimed
+    /// by the holder
+    pub release_data: StateMap<u8, (TokenAmount, Timestamp), S>,
+}
 
+/// Holds the Lock-up details for launch-pad such as:
+///
+/// - Cliff durtaion
+/// - Number of release cycles
+///
+/// Number of release cycles are actually the number of months chosen
+/// by the product owner for linear release of allocated tokens
 #[derive(Serialize, SchemaType, Debug)]
 pub struct Lockup {
-    /// Cliff period of the launchpad
-    pub cliff: TimePeriod,
-    /// Number of cycles in which the vesting will be released
-    /// these cycles are based on number of months
-    pub release_cycles: u8,
-    /// Keeps track of cycles completed since the vesting started
-    pub cycles_rolled: u8,
-    /// Release details related to each cycle
-    pub cycle_details: Vec<ReleaseData>,
+    /// Cliff duration of the launchpad based on
+    /// number of months
+    pub cliff: Timestamp,
+    /// Number of cycles in which the vesting will be
+    /// released, these cycles are based on number of months
+    pub release_cycles: Months,
 }
 
 #[derive(Serialize, SchemaType, Clone, Debug)]

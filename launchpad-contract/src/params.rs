@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::{state::{Admin, Product, TimePeriod, VestingLimits, LaunchPadID}, types::*, ProductName};
+use crate::{state::{Admin, LaunchPadID, Product, TimePeriod, VestingLimits, DAYS}, types::*, ProductName};
 use concordium_cis2::TokenAmountU64 as TokenAmount;
 use concordium_std::*;
 
+pub type Months = u64;
 /// Contract initialization parameters to be passed at the time
 /// of contract init.
 /// 
@@ -37,8 +38,8 @@ pub struct CreateParams {
 impl CreateParams {
     /// Getter function to get the provided time period
     /// of cliff
-    pub fn cliff(&self) -> TimePeriod {
-        self.lockup_details.cliff
+    pub fn cliff(&self) -> Duration {
+        Duration::from_days((self.lockup_details.cliff * DAYS) as u64)
     }
 
     /// Getter function to get the provided ending time
@@ -52,9 +53,9 @@ impl CreateParams {
 #[derive(Serialize, SchemaType)]
 pub struct LockupDetails {
     /// Cliff duration until vesting starts
-    pub cliff: TimePeriod,
+    pub cliff: Months,
     /// Vesting cycles based on months for linear vesting 
-    pub release_cycles: u8,
+    pub release_cycles: Months,
 }
 
 /// Parameters to be passed while invoking the `ApproveLaunchPad` by admin
@@ -82,8 +83,19 @@ pub struct LivePauseParams {
     pub to_pause: bool,
 }
 
+/// Parameters to be passed while invoking `Vest` to invest on a launch pad 
+#[derive(Serialize, SchemaType)]
+pub struct VestParams {
+    /// Product name to identify launch pad in contract
+    /// state
+    pub product_name: ProductName,
+    /// Amount of token to be bought from allocation
+    /// in presale
+    pub token_amount: TokenAmount,
+}
+
 #[derive(Serial, Deserial, SchemaType)]
-pub struct ClaimParams {
+pub struct ClaimTokenParams {
     pub id: ContractTokenId,
     pub address: ContractAddress,
     pub launchpad_id: u64,
@@ -112,11 +124,7 @@ pub struct LaunchpadParam {
     pub cis2_price: u32,
 }
 
-#[derive(Serialize, SchemaType)]
-pub struct VestParams {
-    pub product_name: ProductName,
-    pub token_amount: TokenAmount,
-}
+
 
 #[derive(Serialize, SchemaType, Clone)]
 pub struct TokenInfo {

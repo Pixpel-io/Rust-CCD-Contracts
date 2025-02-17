@@ -9,7 +9,7 @@ pub enum LaunchPadError {
     ParsingFailed, //1
 
     VestingFinished,               // 2
-    VestingNotFinished,            // 3
+    StillVesting,            // 3
     InvalidUser,                   // 4
     LaunchpadNotExist,             // 5
     ContractUser,                  // 6
@@ -45,16 +45,20 @@ pub enum LaunchPadError {
     OnlyAccount,
     OnlyContract,
     OnlyAdmin,
-    LaunchPadNotFound,
+    NotFound,
+    WrongLaunchPad,
     AmountTooLarge,
     MissingAccount,
     WrongContract,
+    WrongHolder,
     WrongTokenAmount,
     WrongTokenID,
     UnAuthorized,
-    IsPaused,
-    IsLive,
-    IsCanceled,
+    Paused,
+    Live,
+    Canceled,
+    CliffNotElapsed,
+    CycleNotElapsed,
     TimeStillLeft,
     PauseLimit,
     PauseDuration,
@@ -67,7 +71,8 @@ pub enum LaunchPadError {
     MissingEntrypoint,
     MessageFailed,
     LogicReject,
-    Trap
+    Trap,
+    CyclesCompleted
 }
 
 impl From<TransferError> for LaunchPadError {

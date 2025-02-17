@@ -1,19 +1,18 @@
-use std::vec;
-
 use concordium_cis2::{
-    AdditionalData, Cis2Client, OnReceivingCis2DataParams, Receiver, TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID, Transfer
+    AdditionalData, Cis2Client, OnReceivingCis2DataParams, TokenAmountU64 as TokenAmount,
+    TokenIdU8 as TokenID, Transfer,
 };
 use concordium_std::{
-    bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
-    ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata, HasCommonData,
-    HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi, HasStateEntry, Host,
-    InitContext, InitResult, Logger, ParseError, ReceiveContext, Reject, Serial, StateBuilder,
-    UnwrapAbort, Write,
+    bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry,
+    ExternContext, ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata,
+    HasCommonData, HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi,
+    HasStateEntry, Host, InitContext, InitResult, Logger, ParseError, ReceiveContext, Reject,
+    Serial, StateBuilder, UnwrapAbort, Write
 };
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
 use params::{ApprovalParams, CreateParams, InitParams, LivePauseParams, VestParams};
-use state::{LaunchPad, LaunchPadStatus, State, TimePeriod};
+use state::{HolderInfo, LaunchPad, LaunchPadStatus, State, TimePeriod};
 use types::ContractResult;
 
 mod contract;
@@ -30,17 +29,23 @@ mod tests;
 pub type ProductName = String;
 
 /// Minimum Cliff duration allowed for a product before vesting
-/// in milliseconds
+/// in milliseconds.
+///
+/// Min duration for cliff is only 7 days.
 const MIN_CLIFF_DURATION: u64 = 6.048e+8 as u64;
 
 /// Minimum Pause duration allowed for a product to be pasued
-/// before vesting in milliseconds
+/// before vesting in milliseconds.
+///
+/// Min pause duation allowed is 48 hrs
 const MIN_PAUSE_DURATION: u64 = 1.728e+8 as u64;
 
 /// Launch-Pad can only be pause at most three times
 const MAX_PAUSE_COUNT: u8 = 3;
 
-/// Alias for OnReceiveCIS2 hook params
+const CYCLE_DURATION: u64 = 2.678e9 as u64;
+
+/// Alias for OnReceiveCIS2 ook params
 type OnReceiveCIS2Params = OnReceivingCis2DataParams<TokenID, TokenAmount, ProductName>;
 
 /// Entry point which initializes the contract with new default state.
@@ -107,8 +112,7 @@ fn create_launchpad(
     // Cliff is consdiered only if it starts after the vesting
     // and has minimum duration of 7 days
     ensure!(
-        params.cliff().end > params.launchpad_end_time()
-            && params.cliff().duration_as_millis() < MIN_CLIFF_DURATION,
+        params.cliff().millis() < MIN_CLIFF_DURATION,
         LaunchPadError::InCorrectCliffPeriod
     );
 
@@ -322,7 +326,7 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     // Check if owner wants to pause the launch pad
     if params.to_pause {
         // Check if the launch pad is already paused
-        ensure!(launchpad.is_live(), LaunchPadError::IsPaused);
+        ensure!(launchpad.is_live(), LaunchPadError::Paused);
         // Check if the pause limit reached, launch pad is allowed
         // to be paused 3 times
         ensure!(
@@ -346,7 +350,7 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     }
 
     // Whether the launch-pad is already live
-    ensure!(launchpad.is_paused(), LaunchPadError::IsLive);
+    ensure!(launchpad.is_paused(), LaunchPadError::Live);
     // Check if the time is still left for pause duration
     // to complete
     ensure!(
@@ -380,15 +384,18 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     // Reading parameters
     let params: VestParams = ctx.parameter_cursor().get()?;
 
+    // Getting the contract's core state and its builder
+    let (state, state_builder) = host.state_and_builder();
+
     // Getting the launch pad from state identified by the product name
-    let (launch_pad_id, mut launchpad) = host.state_mut().get_launchpad(params.product_name)?;
+    let (launch_pad_id, mut launchpad) = state.get_launchpad(params.product_name)?;
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is not finished, either due to vesting duration elapsed or
     // due to hard cap limit reached
-    ensure!(launchpad.is_paused(), LaunchPadError::IsPaused);
-    ensure!(launchpad.is_canceled(), LaunchPadError::IsCanceled);
-    ensure!(launchpad.is_finished(ctx), LaunchPadError::VestingFinished);
+    ensure!(launchpad.is_paused(), LaunchPadError::Paused);
+    ensure!(launchpad.is_canceled(), LaunchPadError::Canceled);
+    ensure!(!launchpad.is_finished(ctx), LaunchPadError::VestingFinished);
 
     // Verify whether the payable vesting amount received is within the
     // min and max vesting allowed
@@ -403,32 +410,38 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     // holder is new or existing in the launch pad state
     match launchpad.holders.entry(holder) {
         // If holder is new to the launch pad, insert him to
-        // the holders list along with his invested amount 
+        // the holders list along with his invested amount
         // and claimable tokens
         Entry::Vacant(entry) => {
-            entry.insert((amount, params.token_amount));
+            entry.insert(HolderInfo {
+                tokens: params.token_amount,
+                invested: amount,
+                cycles_rolled: 0,
+                release_data: state_builder.new_map(),
+            });
         }
-        // If holder already exist in the launch pad, then 
-        // just update it's previous amount and claimable 
+        // If holder already exist in the launch pad, then
+        // just update it's previous amount and claimable
         // tokens.
         Entry::Occupied(mut entry) => {
-            let _ = entry.modify(|(pre_amount, pre_tokens)| {
-                // Ensure that holder does not exceeds the max vesting 
+            let _ = entry.modify(|holder_info| {
+                // Ensure that holder does not exceeds the max vesting
                 // limit allowed
                 ensure!(
-                    *pre_tokens + params.token_amount < vest_max,
+                    holder_info.tokens + params.token_amount < vest_max,
                     LaunchPadError::VestLimit
                 );
-                *pre_amount += amount;
-                *pre_tokens += params.token_amount;
-
+                holder_info.invested += amount;
+                holder_info.tokens += params.token_amount;
                 Ok(())
             });
         }
     }
 
-    // Updating the collected investment so far by the product
+    // Updating the collected investment and allocated tokens sold so far
+    // by the product
     launchpad.collected += amount;
+    launchpad.product.allocated_tokens -= params.token_amount;
 
     // Get the amount of tokens allocated for presale by the owner
     let allocated_tokens = launchpad.product.allocated_tokens;
@@ -436,7 +449,7 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     let reached_soft_cap = launchpad.reached_soft_cap();
     // Check if the product has paid the soft cap share to the platform
     let allocation_paid = launchpad.allocation_paid;
-    
+
     drop(launchpad);
 
     // This is where the allocation share is transfered to the platform admin.
@@ -455,19 +468,22 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
 
         launchpad.allocation_paid = true;
         launchpad.product.allocated_tokens -= allocated_cut;
-    
+
         drop(launchpad);
 
         // Transfering the calculated amount of product tokens
         // as allocated cut based on the allocation share percent
         // to the platform admin.
-        cis2_client.transfer(host, Transfer {
-            token_id,
-            amount: allocated_cut,
-            from: ctx.self_address().into(),
-            to: admin_address.into(),
-            data: AdditionalData::empty()
-        })?;
+        cis2_client.transfer(
+            host,
+            Transfer {
+                token_id,
+                amount: allocated_cut,
+                from: ctx.self_address().into(),
+                to: admin_address.into(),
+                data: AdditionalData::empty(),
+            },
+        )?;
     }
 
     // Contract's core State maintains the list of all the holders(invesotrs)
@@ -488,6 +504,108 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
             });
         }
     }
+
+    Ok(())
+}
+
+#[receive(
+    contract = "LaunchPad",
+    name = "ClaimTokens",
+    mutable,
+    parameter = "String",
+    error = "LaunchPadError"
+)]
+fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
+    // Only Account is supposed to invoke this method
+    let holder = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+    };
+
+    // Reading the product name to identify the launch pad
+    let product_name: ProductName = ctx.parameter_cursor().get()?;
+
+    // Getting the launch pad from state identified by the product name
+    let (_, mut launchpad) = host.state_mut().get_launchpad(product_name)?;
+
+    // Make sure that the launch pad is not paused, is not canceled
+    // or is finished. As well as the cliff duration has elapsed
+    ensure!(launchpad.is_canceled(), LaunchPadError::Canceled);
+    ensure!(launchpad.is_finished(ctx), LaunchPadError::StillVesting);
+    ensure!(
+        launchpad.is_cliff_elapsed(ctx),
+        LaunchPadError::CliffNotElapsed
+    );
+
+    let holder_info = launchpad.get_holder_info(holder)?;
+    let time_now = ctx.metadata().block_time();
+
+    // Check whether the holder is claiming the first cycle of release
+    // First release cycle is handled differently than the other forth
+    // coming cycles.
+    // Moreover, token releases are made linear over the release cycles,
+    // it means that the tokens are equally distributed for each cycle.
+    let (cycle, claimable) = if holder_info.cycles_rolled == 0 {
+        // Make sure that the current cycle duration has elasped
+        // since the cliff duration
+        ensure!(
+            time_now
+                .duration_since(launchpad.lock_up.cliff)
+                .unwrap()
+                .millis()
+                >= CYCLE_DURATION,
+            LaunchPadError::CycleNotElapsed
+        );
+
+        // Return the current release cycle count and amount of
+        // claimable tokens
+        (1, holder_info.tokens.0 / launchpad.lock_up.release_cycles)
+    } else {
+        let last_cycle = holder_info.cycles_rolled;
+        let last_released = holder_info.release_data.get(&last_cycle).unwrap();
+
+        // Ensuring that holder is not exceeding the claims more
+        // than the number of release cycles.
+        // Also ensuring that the cycle duration has elapsed since
+        // the last release for the holder
+        ensure!(
+            last_cycle >= launchpad.lock_up.release_cycles as u8,
+            LaunchPadError::CyclesCompleted
+        );
+        ensure!(
+            time_now.duration_since(last_released.1).unwrap().millis() >= CYCLE_DURATION,
+            LaunchPadError::CycleNotElapsed
+        );
+
+        // Return the current release cycle count and amount of
+        // claimable tokens
+        (
+            last_cycle + 1,
+            holder_info.tokens.0 / launchpad.lock_up.release_cycles,
+        )
+    };
+
+    // Setting the release information regarding the current release
+    // being made for the current holder
+    launchpad.set_holder_release_info(holder, cycle, (claimable.into(), time_now));
+
+    let cis2_client = Cis2Client::new(launchpad.get_cis2_contract());
+    let token_id = launchpad.get_product_token_id();
+
+    drop(launchpad);
+
+    // Here are the allocated tokens transfered to the holder based on
+    // the current release cycle count.
+    cis2_client.transfer::<State, TokenID, TokenAmount, LaunchPadError>(
+        host,
+        Transfer {
+            token_id,
+            amount: claimable.into(),
+            from: ctx.self_address().into(),
+            to: holder.into(),
+            data: AdditionalData::empty(),
+        },
+    )?;
 
     Ok(())
 }
