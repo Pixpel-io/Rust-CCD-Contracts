@@ -57,6 +57,8 @@ pub enum LaunchPadError {
     Paused,
     Live,
     Canceled,
+    UnableToCancel,
+    WithDrawn,
     CliffNotElapsed,
     CycleNotElapsed,
     TimeStillLeft,
@@ -66,13 +68,15 @@ pub enum LaunchPadError {
     LogMalformed,
     VestLimit,
     SoftReached,
+    SoftNotReached,
     InvalidResponse,
     MissingContract,
     MissingEntrypoint,
     MessageFailed,
     LogicReject,
     Trap,
-    CyclesCompleted
+    CyclesCompleted,
+    Completed
 }
 
 impl From<TransferError> for LaunchPadError {

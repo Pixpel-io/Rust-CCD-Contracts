@@ -3,11 +3,11 @@ use concordium_cis2::{
     TokenIdU8 as TokenID, Transfer,
 };
 use concordium_std::{
-    bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry,
-    ExternContext, ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata,
-    HasCommonData, HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi,
-    HasStateEntry, Host, InitContext, InitResult, Logger, ParseError, ReceiveContext, Reject,
-    Serial, StateBuilder, UnwrapAbort, Write
+    bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
+    ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata, HasCommonData,
+    HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi, HasStateEntry, Host,
+    InitContext, InitResult, Logger, ParseError, ReceiveContext, Reject, Serial, StateBuilder,
+    UnwrapAbort, Write,
 };
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
@@ -26,6 +26,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+/// Alias for String as launch pad product name
 pub type ProductName = String;
 
 /// Minimum Cliff duration allowed for a product before vesting
@@ -43,6 +44,9 @@ const MIN_PAUSE_DURATION: u64 = 1.728e+8 as u64;
 /// Launch-Pad can only be pause at most three times
 const MAX_PAUSE_COUNT: u8 = 3;
 
+/// Single release cycle duration in milliseconds
+///
+/// release duration for each cycle is 1 month.
 const CYCLE_DURATION: u64 = 2.678e9 as u64;
 
 /// Alias for OnReceiveCIS2 ook params
@@ -176,9 +180,9 @@ fn approve_launchpad(
 
     // Getting the launch-pad to be approved and updating its
     // status to LIVE
-    let (launch_pad_id, mut launchpad) = host.state_mut().get_launchpad(params.product_name)?;
+    let (launch_pad_id, mut launchpad) = host.state_mut().get_mut_launchpad(params.product_name)?;
 
-    if params.approve {
+    let transfer_to = if params.approve {
         // Updating the launch-pad status to approved
         launchpad.status = LaunchPadStatus::APPROVED;
 
@@ -189,31 +193,26 @@ fn approve_launchpad(
 
         drop(launchpad);
 
-        // Transfering the registeration fee to platform
-        host.invoke_transfer(
-            &host.state().admin_address(),
-            host.state().admin_registeration_fee(),
-        )?;
+        host.state().admin_address()
+    } else {
+        // Updating the launch-pad status to rejected if analyst
+        // has rejected the launchpad
+        launchpad.status = LaunchPadStatus::REJECTED;
 
-        return Ok(());
-    }
+        logger.log(&Event::REJECTED(RejectEvent {
+            launchpad_id: launch_pad_id,
+            launchpad_name: launchpad.product_name(),
+        }))?;
 
-    // Updating the launch-pad status to rejected if analyst
-    // has rejected the launchpad
-    launchpad.status = LaunchPadStatus::REJECTED;
+        let owner = launchpad.get_product_owner();
+        drop(launchpad);
 
-    logger.log(&Event::REJECTED(RejectEvent {
-        launchpad_id: launch_pad_id,
-        launchpad_name: launchpad.product_name(),
-    }))?;
-
-    let owner = launchpad.get_product_owner();
-
-    drop(launchpad);
+        owner
+    };
 
     // Refunding the product owner in case if the launch-pad
     // is rejected
-    host.invoke_transfer(&owner, host.state().admin_registeration_fee())?;
+    host.invoke_transfer(&transfer_to, host.state().admin_registeration_fee())?;
 
     Ok(())
 }
@@ -250,7 +249,7 @@ fn deposit_tokens(
 
     // Fetching the launch-pad from the state if the correct
     // product name is supplied
-    let (launch_pad_id, mut launchpad) = host.state_mut().get_launchpad(data)?;
+    let (launch_pad_id, mut launchpad) = host.state_mut().get_mut_launchpad(data)?;
 
     // Making sure that the deposit is made by the product
     // owner
@@ -309,7 +308,7 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     let params: LivePauseParams = ctx.parameter_cursor().get()?;
 
     // Getting the launch pad from state identified by the product name
-    let (_, mut launchpad) = host.state_mut().get_launchpad(params.poduct_name)?;
+    let (_, mut launchpad) = host.state_mut().get_mut_launchpad(params.poduct_name)?;
 
     // Product owner (developer) is only allowed to pause
     // the launch pad
@@ -388,7 +387,7 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     let (state, state_builder) = host.state_and_builder();
 
     // Getting the launch pad from state identified by the product name
-    let (launch_pad_id, mut launchpad) = state.get_launchpad(params.product_name)?;
+    let (launch_pad_id, mut launchpad) = state.get_mut_launchpad(params.product_name)?;
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is not finished, either due to vesting duration elapsed or
@@ -459,7 +458,8 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     // Allocation share is paid in terms of perecentile amount of tokens from the
     // product ICO (initial coin offering)
     if reached_soft_cap && !allocation_paid {
-        let allocated_cut = allocated_tokens * host.state().admin_allocation_share();
+        let allocated_cut =
+            ((allocated_tokens.0 * host.state().admin_allocation_share()) / 100).into();
         let admin_address = host.state().admin_address();
         let mut launchpad = host.state_mut().get_launchpad_by_id(launch_pad_id)?;
         let token_id = launchpad.get_product_token_id();
@@ -526,7 +526,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
     let product_name: ProductName = ctx.parameter_cursor().get()?;
 
     // Getting the launch pad from state identified by the product name
-    let (_, mut launchpad) = host.state_mut().get_launchpad(product_name)?;
+    let (_, mut launchpad) = host.state_mut().get_mut_launchpad(product_name)?;
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished. As well as the cliff duration has elapsed
@@ -606,6 +606,130 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
             data: AdditionalData::empty(),
         },
     )?;
+
+    Ok(())
+}
+
+#[receive(
+    contract = "LaunchPad",
+    name = "WithdrawFunds",
+    mutable,
+    parameter = "String",
+    error = "LaunchPadError"
+)]
+fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
+    // Only Account is supposed to invoke this method
+    let owner = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+    };
+
+    // Reading the product name to identify the launch pad
+    let product_name: ProductName = ctx.parameter_cursor().get()?;
+
+    // Getting the launch pad from state identified by the product name
+    let (launch_pad_id, launchpad) = host.state().get_launchpad(product_name)?;
+
+    // Make sure that the transaction is authorized
+    ensure!(
+        owner == launchpad.get_product_owner(),
+        LaunchPadError::UnAuthorized
+    );
+
+    // Make sure that the launch pad is not paused, is not canceled
+    // or is finished.
+    ensure!(launchpad.is_canceled(), LaunchPadError::Canceled);
+    ensure!(!launchpad.is_completed(), LaunchPadError::Completed);
+    ensure!(launchpad.is_finished(ctx), LaunchPadError::StillVesting);
+
+    // Owner can only withdraw collected funds if and only if
+    // the product has acheived soft cap and the funds are not
+    // already raised
+    if !launchpad.withdrawn && launchpad.reached_soft_cap() {
+        ensure!(launchpad.reached_soft_cap(), LaunchPadError::SoftNotReached);
+
+        // Calculating the amount of funds in CCD to be locked
+        // in liquidity according to the percentage provided by
+        // the owner
+        let liquidity_allocation = Amount::from_micro_ccd(
+            (launchpad.collected.micro_ccd * launchpad.liquidity_details.liquidity_allocation)
+                / 100,
+        );
+
+        // Remaining amount in CCD that can be withdrawn after the
+        // allocation
+        let withdrawable = launchpad.collected - liquidity_allocation;
+
+        // TODO
+        //
+        // Need to implement the liquidity logic with DEX integration
+        // to lock the funds before trasfering the funds to the owner
+        //
+        // And pay the the LPTokens bought from the DEX to admin
+
+        // Transfering the withdrawable amount to the owner
+        host.invoke_transfer(&owner, withdrawable)?;
+        // Set the withdrawn flag in launchpad state
+        host.state_mut()
+            .get_launchpad_by_id(launch_pad_id)
+            .unwrap()
+            .withdrawn = true;
+
+        return Ok(());
+    }
+
+    Err(LaunchPadError::WithDrawn)
+}
+
+
+#[receive(
+    contract = "LaunchPad",
+    name = "WithDrawLockedFunds",
+    mutable,
+    parameter = "String",
+    error = "LaunchPadError"
+)]
+fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()>  {
+    todo!("NOT YET IMPLEMENTED")
+}
+
+#[receive(
+    contract = "LaunchPad",
+    name = "CancelLaunchPad",
+    mutable,
+    parameter = "String",
+    error = "LaunchPadError"
+)]
+fn cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
+    // Only Account is supposed to invoke this method
+    let owner = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+    };
+
+    // Reading the product name to identify the launch pad
+    let product_name: ProductName = ctx.parameter_cursor().get()?;
+
+    // Getting the launch pad from state identified by the product name
+    let (launch_pad_id, launchpad) = host.state().get_launchpad(product_name)?;
+
+    // Make sure that the transaction is authorized
+    ensure!(
+        owner == launchpad.get_product_owner(),
+        LaunchPadError::UnAuthorized
+    );
+
+    // Make sure that the launch pad is not already canceled, did not
+    //reach the soft cap, launch pad is not completed.
+    ensure!(
+        !launchpad.is_canceled() && !launchpad.is_completed() && !launchpad.reached_soft_cap(),
+        LaunchPadError::Canceled
+    );
+
+    host.state_mut()
+        .get_launchpad_by_id(launch_pad_id)
+        .unwrap()
+        .status = LaunchPadStatus::CANCELED;
 
     Ok(())
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{state::{Admin, LaunchPadID, Product, TimePeriod, VestingLimits, DAYS}, types::*, ProductName};
+use crate::{state::{Admin, LaunchPadID, LiquidityDetails, Product, TimePeriod, VestingLimits, DAYS}, types::*, ProductName};
 use concordium_cis2::TokenAmountU64 as TokenAmount;
 use concordium_std::*;
 
@@ -32,7 +32,9 @@ pub struct CreateParams {
     /// for presale
     pub vest_limits: VestingLimits,
     /// Lock up information for vesting releases
-    pub lockup_details: LockupDetails
+    pub lockup_details: LockupDetails,
+    /// Token Liquidity information to lock the funds
+    pub liquidity_details: LiquidityDetails
 }
 
 impl CreateParams {

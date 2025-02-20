@@ -1,8 +1,8 @@
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, Duration, HasChainMetadata,
-    HasCommonData, HashMap, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder,
-    StateMap, StateRef, StateRefMut, Timestamp,
+    HasCommonData, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder, StateMap,
+    StateRef, StateRefMut, Timestamp,
 };
 use twox_hash::xxh3::hash64;
 
@@ -16,7 +16,9 @@ use crate::{
 pub type LaunchPadID = u64;
 
 /// Alias for mutable state reference of a `LaunchPad` type
-pub type LaunchPadState<'a> = StateRefMut<'a, LaunchPad, StateApi>;
+pub type LaunchPadStateMut<'a> = StateRefMut<'a, LaunchPad, StateApi>;
+/// Alias for immutable state reference of a `LaunchPad` type
+pub type LaunchPadState<'a> = StateRef<'a, LaunchPad>;
 
 /// Number of days in a month
 pub const DAYS: u64 = 31;
@@ -46,7 +48,7 @@ impl State {
     ///
     /// Returns `Amount` in CCD
     pub fn admin_registeration_fee(&self) -> Amount {
-        self.admin.registeration_fee
+        self.admin.registeration_fee()
     }
 
     /// Gets the platform admin account address
@@ -64,13 +66,14 @@ impl State {
         self.admin.liquidity_share()
     }
 
-    /// Gets the `LaunchPad` by product name with its associative ID
+    /// Gets the mutable reference to `LaunchPad` by product name with 
+    /// its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
-    pub fn get_launchpad(
+    pub fn get_mut_launchpad(
         &mut self,
         product_name: String,
-    ) -> Result<(LaunchPadID, LaunchPadState<'_>), LaunchPadError> {
+    ) -> Result<(LaunchPadID, LaunchPadStateMut<'_>), LaunchPadError> {
         let launch_pad_id = hash64(product_name.as_bytes());
 
         if let Some(launchpad) = self.launchpads.get_mut(&launch_pad_id) {
@@ -80,10 +83,29 @@ impl State {
         Err(LaunchPadError::NotFound)
     }
 
-    /// Gets the `LaunchPad` by its associative ID
+    /// Gets the immutable reference to `LaunchPad` by product name with 
+    /// its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
-    pub fn get_launchpad_by_id(&mut self, id: u64) -> Result<LaunchPadState<'_>, LaunchPadError> {
+    pub fn get_launchpad(
+        &self,
+        product_name: String,
+    ) -> Result<(LaunchPadID, LaunchPadState<'_>), LaunchPadError> {
+        let launch_pad_id = hash64(product_name.as_bytes());
+        if let Some(launchpad) = self.launchpads.get(&launch_pad_id) {
+            return Ok((launch_pad_id, launchpad));
+        }
+
+        Err(LaunchPadError::NotFound)
+    }
+
+    /// Gets the mutable reference to `LaunchPad` by its associative ID
+    ///
+    /// Returns `LaunchPadError` if the LaunchPad does not exist.
+    pub fn get_launchpad_by_id(
+        &mut self,
+        id: u64,
+    ) -> Result<LaunchPadStateMut<'_>, LaunchPadError> {
         if let Some(launchpad) = self.launchpads.get_mut(&id) {
             return Ok(launchpad);
         }
@@ -122,10 +144,16 @@ pub struct LaunchPad<S = StateApi> {
     pub vest_limits: VestingLimits,
     /// Details regarding the presale lock-up
     pub lock_up: Lockup,
+    /// Details regarding the liquidity to lock and
+    /// hold the funds
+    pub liquidity_details: LiquidityDetails,
     /// Keeps track if the allocation share is paid
     pub allocation_paid: bool,
     /// Keeps track if the liquidity share is paid
     pub liquidity_paid: bool,
+    /// Keeps track if the raised funds are already
+    /// withdrawn
+    pub withdrawn: bool,
 }
 
 impl LaunchPad {
@@ -157,8 +185,10 @@ impl LaunchPad {
                     cliff,
                     release_cycles: params.lockup_details.release_cycles,
                 },
+                liquidity_details: params.liquidity_details,
                 allocation_paid: false,
                 liquidity_paid: false,
+                withdrawn: false,
             },
         )
     }
@@ -233,6 +263,11 @@ impl LaunchPad {
     /// Checks if the Launch pad is caneled
     pub fn is_canceled(&self) -> bool {
         self.status == LaunchPadStatus::CANCELED
+    }
+
+    /// Checks if the Launch pad is caneled
+    pub fn is_completed(&self) -> bool {
+        self.status == LaunchPadStatus::COMPLETED
     }
 
     /// Returns the base price of allocated token for presale
@@ -407,6 +442,24 @@ pub struct Lockup {
     /// number of months
     pub cliff: Timestamp,
     /// Number of cycles in which the vesting will be
+    /// released, these cycles are based on number of months
+    pub release_cycles: Months,
+}
+
+/// Holds the details regarding liquidity allocation of the raised funds
+/// for launch-pad such as:
+///
+/// - Amount of funds to be locked in liquidity as LPTokens
+/// - Number of release cycles
+///
+/// Number of release cycles are actually the number of months chosen
+/// by the product owner for linear release of allocated tokens
+#[derive(Serialize, SchemaType, Debug)]
+pub struct LiquidityDetails {
+    /// Amount of funds in percentage to be allocated and
+    /// locked in liquidity within 40% to 60%
+    pub liquidity_allocation: u64,
+    /// Number of cycles in which the LPToken will be
     /// released, these cycles are based on number of months
     pub release_cycles: Months,
 }

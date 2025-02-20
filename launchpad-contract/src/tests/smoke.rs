@@ -1,4 +1,7 @@
+use concordium_std::schema::SchemaType;
 use twox_hash::xxh3::hash64;
+
+use crate::state::VestingLimits;
 
 
 #[test]
