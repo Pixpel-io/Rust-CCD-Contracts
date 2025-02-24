@@ -1,0 +1,3 @@
+/target
+/Cargo.lock
+contract.wasm.v1

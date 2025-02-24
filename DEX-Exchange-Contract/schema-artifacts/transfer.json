@@ -1,0 +1,38 @@
+[
+  {
+    "amount": "<String of size at most 74 containing an unsigned integer.>",
+    "data": "<String with lowercase hex>",
+    "from": {
+      "Enum": [
+        {
+          "Account": ["<AccountAddress>"]
+        },
+        {
+          "Contract": [
+            {
+              "index": "<UInt64>",
+              "subindex": "<UInt64>"
+            }
+          ]
+        }
+      ]
+    },
+    "to": {
+      "Enum": [
+        {
+          "Account": ["<AccountAddress>"]
+        },
+        {
+          "Contract": [
+            {
+              "index": "<UInt64>",
+              "subindex": "<UInt64>"
+            },
+            "<String>"
+          ]
+        }
+      ]
+    },
+    "token_id": "<String with lowercase hex>"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "address": {
+      "Enum": [
+        {
+          "Account": ["<AccountAddress>"]
+        },
+        {
+          "Contract": [
+            {
+              "index": "<UInt64>",
+              "subindex": "<UInt64>"
+            }
+          ]
+        }
+      ]
+    },
+    "owner": {
+      "Enum": [
+        {
+          "Account": ["<AccountAddress>"]
+        },
+        {
+          "Contract": [
+            {
+              "index": "<UInt64>",
+              "subindex": "<UInt64>"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

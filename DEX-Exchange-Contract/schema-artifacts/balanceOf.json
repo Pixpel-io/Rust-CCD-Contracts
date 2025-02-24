@@ -1,0 +1,20 @@
+[
+  {
+    "address": {
+      "Enum": [
+        {
+          "Account": ["<AccountAddress>"]
+        },
+        {
+          "Contract": [
+            {
+              "index": "<UInt64>",
+              "subindex": "<UInt64>"
+            }
+          ]
+        }
+      ]
+    },
+    "token_id": "<String with lowercase hex>"
+  }
+]

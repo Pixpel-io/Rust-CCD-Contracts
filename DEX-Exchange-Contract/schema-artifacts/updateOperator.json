@@ -1,0 +1,29 @@
+[
+  {
+    "operator": {
+      "Enum": [
+        {
+          "Account": ["<AccountAddress>"]
+        },
+        {
+          "Contract": [
+            {
+              "index": "<UInt64>",
+              "subindex": "<UInt64>"
+            }
+          ]
+        }
+      ]
+    },
+    "update": {
+      "Enum": [
+        {
+          "Remove": []
+        },
+        {
+          "Add": []
+        }
+      ]
+    }
+  }
+]

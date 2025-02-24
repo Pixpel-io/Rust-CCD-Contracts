@@ -1,0 +1,18 @@
+{
+  "min_purchased_token_amount": "<String of size at most 74 containing an unsigned integer.>",
+  "purchased_token": {
+    "address": {
+      "index": "<UInt64>",
+      "subindex": "<UInt64>"
+    },
+    "id": "<String with lowercase hex>"
+  },
+  "token": {
+    "address": {
+      "index": "<UInt64>",
+      "subindex": "<UInt64>"
+    },
+    "id": "<String with lowercase hex>"
+  },
+  "token_sold": "<String of size at most 74 containing an unsigned integer.>"
+}

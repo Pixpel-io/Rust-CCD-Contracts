@@ -1,0 +1,23 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "tokens_swap"
+version = "0.1.0"
+edition = "2018"
+description = "-"
+
+[features]
+default = ["std", "wee_alloc"]
+std = ["concordium-std/std", "concordium-cis2/std"]
+wee_alloc = ["concordium-std/wee_alloc"]
+
+[dependencies]
+concordium-std = "6.0.1"
+concordium-cis2 = "3.0.0"
+
+[lib]
+crate-type=["cdylib", "rlib"]
+
+[profile.release]
+opt-level = "s"
+codegen-units = 1

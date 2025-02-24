@@ -1,0 +1,24 @@
+{
+  "holder": {
+    "Enum": [
+      {
+        "Account": ["<AccountAddress>"]
+      },
+      {
+        "Contract": [
+          {
+            "index": "<UInt64>",
+            "subindex": "<UInt64>"
+          }
+        ]
+      }
+    ]
+  },
+  "token": {
+    "address": {
+      "index": "<UInt64>",
+      "subindex": "<UInt64>"
+    },
+    "id": "<String with lowercase hex>"
+  }
+}
