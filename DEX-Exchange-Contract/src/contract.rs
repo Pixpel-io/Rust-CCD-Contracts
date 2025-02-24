@@ -1,6 +1,7 @@
 use concordium_std::*;
 use concordium_cis2::*;
 
+// Importing custom modules for state management, parameters, errors, events, responses, types, and CIS-2 client utilities
 use crate::state::*;
 use crate::params::*;
 use crate::errors::*;
@@ -9,6 +10,148 @@ use crate::responses::*;
 use crate::types::*;
 use crate::cis2_client::Cis2Client;
 
+/*
+ * OVERVIEW OF FUNCTIONS IN contract.rs
+ *
+ * This file implements the core logic of the `pixpel_swap` decentralized exchange (DEX) smart contract on the Concordium blockchain.
+ * It supports liquidity pools, token swaps, and CIS-2 compliant LP token operations. Below is a summary of each function's purpose,
+ * inputs, outputs, state changes, and potential errors.
+ *
+ * CONSTANTS:
+ * - `TOKEN_METADATA_BASE_URL: &str`: Base URL for LP token metadata (e.g., "https://concordium-servernode.dev-site.space/api/v1/metadata/swap/lp-tokens?").
+ * - `SUPPORTS_STANDARDS: [StandardIdentifier; 2]`: Defines supported standards (CIS-0, CIS-2) for the `supports` entrypoint.
+ * - `FEE_MULTIPLIER: u128 = 10000`: Multiplier for fee calculations (100% = 10000 basis points).
+ * - `FEE: u128 = 100`: Swap fee (1% = 100 basis points).
+ *
+ * INITIALIZATION:
+ * - `init`: Initializes the contract with an empty state.
+ *   - Inputs: `_ctx: &impl HasInitContext` (unused), `state_builder: &mut StateBuilder<S>` (state constructor).
+ *   - Output: `InitResult<State<S>>` (empty state or error).
+ *   - State Changes: Creates an empty `State` (no exchanges, LP tokens).
+ *   - Errors: Generic `InitResult` errors (e.g., out of energy).
+ *
+ * HELPER FUNCTIONS:
+ * - `get_token_reserve`: Queries the token balance (reserve) of the contract for a given token.
+ *   - Inputs: `ctx: &impl HasReceiveContext` (self-address), `host: &mut impl HasHost` (state/CIS-2 access), `token_info: &TokenInfo` (token ID/address).
+ *   - Output: `ContractResult<ContractTokenAmount>` (balance or error).
+ *   - State Changes: None (read-only).
+ *   - Errors: `InvokeContractError` (CIS-2 query fails).
+ * - `get_token_reserve_safe`: Safe version of `get_token_reserve`, returns 0 on error.
+ *   - Inputs: Same as `get_token_reserve`.
+ *   - Output: `ContractTokenAmount` (balance or 0).
+ *   - State Changes: None.
+ *   - Errors: None (errors are swallowed).
+ *
+ * VIEW FUNCTIONS:
+ * - `contract_view`: Returns the full contract state (exchanges, LP tokens, balances).
+ *   - Inputs: `ctx: &impl HasReceiveContext` (self-address), `host: &mut impl HasHost` (state/balance access).
+ *   - Output: `ReceiveResult<StateView>` (state view or error).
+ *   - State Changes: None (read-only, mutable due to CIS-2 calls).
+ *   - Errors: `ParseParamsError` (parameter parsing fails).
+ *
+ * EXCHANGES:
+ * - `get_exchange`: Returns the state of a specific exchange for a holder.
+ *   - Inputs: `ctx: &impl HasReceiveContext` (parameters), `host: &mut impl HasHost` (state access).
+ *   - Output: `ContractResult<ExchangeView>` (exchange details or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`, `ExchangeNotFound`.
+ * - `get_exchanges`: Returns all exchanges for a holder.
+ *   - Inputs: Same as `get_exchange`.
+ *   - Output: `ContractResult<ExchangesView>` (list of exchange views or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`.
+ *
+ * LP TOKENS:
+ * - `lpt_transfer`: Transfers LP tokens between addresses (CIS-2 compliant).
+ *   - Inputs: `ctx: &impl HasReceiveContext` (sender/parameters), `host: &mut impl HasHost` (state/calls), `logger: &mut impl HasLogger` (events).
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `lp_tokens_state` balances.
+ *   - Errors: `ParseParamsError`, `Unauthorized`, `LogFull`, `LogMalformed`, `InvokeContractError`.
+ * - `lpt_update_operator`: Adds/removes operators for LP tokens (CIS-2 compliant).
+ *   - Inputs: Same as `lpt_transfer`.
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `lp_tokens_state.operators`.
+ *   - Errors: `ParseParamsError`, `LogFull`, `LogMalformed`.
+ * - `lpt_balance_of`: Queries LP token balances (CIS-2 compliant).
+ *   - Inputs: `ctx: &impl HasReceiveContext` (parameters), `host: &impl HasHost` (state access).
+ *   - Output: `ContractResult<ContractBalanceOfQueryResponse>` (balances or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`.
+ * - `lpt_operator_of`: Checks if an address is an operator (CIS-2 compliant).
+ *   - Inputs: Same as `lpt_balance_of`.
+ *   - Output: `ContractResult<OperatorOfQueryResponse>` (statuses or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`.
+ * - `build_token_metadata_url`: Constructs metadata URL for an LP token.
+ *   - Inputs: `token_info: &TokenInfo` (token details).
+ *   - Output: `String` (URL).
+ *   - State Changes: None.
+ *   - Errors: None.
+ * - `lpt_token_metadata`: Returns metadata URLs for LP tokens (CIS-2 compliant).
+ *   - Inputs: Same as `lpt_balance_of`.
+ *   - Output: `ContractResult<TokenMetadataQueryResponse>` (URLs or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`, `InvalidTokenId`.
+ * - `lpt_on_cis2_received`: Placeholder for receiving CIS-2 tokens (CIS-2 compliance).
+ *   - Inputs: `_ctx: &impl HasReceiveContext`, `_host: &impl HasHost` (unused).
+ *   - Output: `ContractResult<()>` (always success).
+ *   - State Changes: None.
+ *   - Errors: None.
+ * - `lpt_supports`: Checks support for standards (CIS-0 compliant).
+ *   - Inputs: `ctx: &impl HasReceiveContext` (parameters), `_host: &impl HasHost` (unused).
+ *   - Output: `ContractResult<SupportsQueryResponse>` (support statuses or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`.
+ *
+ * LIQUIDITY POOLS:
+ * - `lp_add_liquidity`: Adds CCD and tokens to a pool, mints LP tokens.
+ *   - Inputs: `ctx: &impl HasReceiveContext` (sender/parameters), `host: &mut impl HasHost` (state/tokens), `amount: Amount` (CCD), `logger: &mut impl HasLogger` (events).
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `exchanges`, `lp_tokens_state`, `lp_tokens_supply`.
+ *   - Errors: `ParseParamsError`, `ExchangeNotFound`, `IncorrectTokenCcdRatio`, `TokenNotCis2`, `NotOperator`, `InvokeContractError`, `LogFull`, `LogMalformed`.
+ * - `lp_remove_liquidity`: Removes liquidity, burns LP tokens, returns CCD and tokens.
+ *   - Inputs: Same as `lp_add_liquidity` (no `amount`).
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `exchanges`, `lp_tokens_state`, `lp_tokens_supply`.
+ *   - Errors: `ParseParamsError`, `CalledByAContract`, `ExchangeNotFound`, `InvokeContractError`, `InvokeTransferError`, `LogFull`, `LogMalformed`.
+ *
+ * SWAPS:
+ * - `get_output_amount`: Calculates swap output amount after fees.
+ *   - Inputs: `input_amount: u64`, `input_reserve: u64`, `output_reserve: u64`.
+ *   - Output: `ContractResult<u64>` (output amount or error).
+ *   - State Changes: None.
+ *   - Errors: `InvalidReserves`.
+ * - `get_ccd_to_token_swap_amount`: Estimates tokens for CCD sold.
+ *   - Inputs: `ctx: &impl HasReceiveContext` (parameters), `host: &mut impl HasHost` (state).
+ *   - Output: `ContractResult<SwapAmountResponse>` (token amount or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`, `InvalidReserves`.
+ * - `get_token_to_ccd_swap_amount`: Estimates CCD for tokens sold.
+ *   - Inputs: Same as above.
+ *   - Output: `ContractResult<SwapAmountResponse>` (CCD amount or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`, `InvalidReserves`.
+ * - `get_token_to_token_swap_amount`: Estimates tokens for token-to-token swap.
+ *   - Inputs: Same as above.
+ *   - Output: `ContractResult<SwapAmountResponse>` (purchased token amount or error).
+ *   - State Changes: None.
+ *   - Errors: `ParseParamsError`, `InvalidReserves`.
+ * - `ccd_to_token_swap`: Swaps CCD for tokens.
+ *   - Inputs: `ctx: &impl HasReceiveContext` (sender/parameters), `host: &mut impl HasHost` (state/tokens), `amount: Amount` (CCD), `logger: &mut impl HasLogger` (events).
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `exchanges.ccd_balance`.
+ *   - Errors: `ParseParamsError`, `CalledByAContract`, `InvalidReserves`, `InsufficientOutputAmount`, `InvokeContractError`, `LogFull`, `LogMalformed`.
+ * - `token_to_ccd_swap`: Swaps tokens for CCD.
+ *   - Inputs: `ctx: &impl HasReceiveContext` (sender/parameters), `host: &mut impl HasHost` (state/tokens), `_logger: &mut impl HasLogger` (unused).
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `exchanges.ccd_balance`.
+ *   - Errors: `ParseParamsError`, `CalledByAContract`, `NotOperator`, `InvalidReserves`, `InsufficientOutputAmount`, `InvokeContractError`, `InvokeTransferError`.
+ * - `token_to_token_swap`: Swaps one token for another via CCD.
+ *   - Inputs: Same as `token_to_ccd_swap`.
+ *   - Output: `ContractResult<()>` (success or error).
+ *   - State Changes: Updates `exchanges.ccd_balance` for both tokens.
+ *   - Errors: `ParseParamsError`, `CalledByAContract`, `NotOperator`, `InvalidReserves`, `InsufficientOutputAmount`, `InvokeContractError`.
+ */
 
 const TOKEN_METADATA_BASE_URL: &str = "https://concordium-servernode.dev-site.space/api/v1/metadata/swap/lp-tokens?";
 
