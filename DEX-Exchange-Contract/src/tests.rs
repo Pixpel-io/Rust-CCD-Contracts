@@ -1,5 +1,102 @@
 use concordium_std::*;
 
+/*
+ * OVERVIEW OF tests.rs
+ *
+ * This file contains the unit tests for the `pixpel_swap` smart contract on the Concordium blockchain, using the `concordium_cfg_test`
+ * framework. It tests the contract's initialization, LP token operations (transfer, operator updates, balance queries), and liquidity
+ * pool functionality (add/remove liquidity). The tests use a mock environment provided by `concordium_std::test_infrastructure`.
+ *
+ * CONSTANTS:
+ * - `ACCOUNT_DEPLOYER`, `ACCOUNT_USER`, `ACCOUNT_ANOTHER_USER`, `ACCOUNT_OPERATOR`, `ACCOUNT_VILLAIN`: Predefined account addresses for testing.
+ * - `ADDRESS_*`: Corresponding `Address` variants for the above accounts.
+ * - `SWAP_INDEX: u64 = 500`: Contract index for the `pixpel_swap` contract in tests.
+ *
+ * HELPER STRUCTS AND FUNCTIONS:
+ * - `CallResult<T>`: Wraps test results with a result value, logger, and host state for inspection.
+ *   - Fields: `result: T` (test outcome), `logger: TestLogger` (logged events), `host: TestHost<State<TestStateApi>>` (state after execution).
+ * - `get_token_index(number: u64) -> u64`: Generates a token contract index (1000 + number).
+ * - `get_token(number: u64) -> TokenInfo`: Creates a `TokenInfo` with a fixed token ID and contract address based on `number`.
+ * - `get_ctx(address_sender: Address) -> TestReceiveContext`: Sets up a test context with sender and contract address.
+ * - `get_host() -> TestHost<State<TestStateApi>>`: Initializes a fresh test host with an empty state.
+ * - `mock_cis2_supports`, `mock_cis2_operator_of`, `mock_cis2_balance_of`, `mock_cis2_transfer`: Mock CIS-2 entrypoints (`supports`, `operatorOf`, `balanceOf`, `transfer`) for token contract interactions.
+ * - `expect_error`: Asserts that a `Result` is an error and matches the expected value, with a custom message.
+ *
+ * TESTS:
+ * - `test_0010_init_success`:
+ *   - Purpose: Verifies successful contract initialization.
+ *   - Setup: Empty context and state builder.
+ *   - Assertion: `init` returns `Ok` with an empty state.
+ *   - Errors: Fails if initialization returns an unexpected error.
+ *
+ * - `mint_and_transfer(sender: Address, amount: ContractTokenAmount) -> CallResult<ContractResult<()>>`:
+ *   - Purpose: Helper to mint LP tokens and test transfers, used by multiple tests.
+ *   - Setup: Mints 1B tokens to `ADDRESS_USER`, adds `ADDRESS_OPERATOR`, attempts a transfer.
+ *   - Returns: `CallResult` with transfer result, logger, and host state.
+ *
+ * - `test_0020_lpt_transfer_success`:
+ *   - Purpose: Tests successful LP token transfer from owner.
+ *   - Setup: Uses `mint_and_transfer` with `ADDRESS_USER` as sender.
+ *   - Assertions: Transfer succeeds, balances update (0 for sender, 1B for receiver), one `Transfer` event logged.
+ *   - Errors: Fails if transfer fails or balances/events are incorrect.
+ *
+ * - `test_0021_lpt_transfer_operator_success`:
+ *   - Purpose: Tests successful LP token transfer by an operator.
+ *   - Setup: Uses `mint_and_transfer` with `ADDRESS_OPERATOR`.
+ *   - Assertions: Transfer succeeds.
+ *   - Errors: Fails if transfer fails.
+ *
+ * - `test_0022_lpt_transfer_wrong_sender`:
+ *   - Purpose: Tests transfer failure with an unauthorized sender.
+ *   - Setup: Uses `mint_and_transfer` with `ADDRESS_VILLAIN`.
+ *   - Assertions: Fails with `Unauthorized` error.
+ *   - Errors: Fails if error isn’t `Unauthorized`.
+ *
+ * - `test_0023_lpt_transfer_wrong_amount`:
+ *   - Purpose: Tests transfer failure with insufficient funds.
+ *   - Setup: Uses `mint_and_transfer` with amount exceeding minted tokens.
+ *   - Assertions: Fails with `InsufficientFunds` error.
+ *   - Errors: Fails if error isn’t `InsufficientFunds`.
+ *
+ * - `test_update_operator(operator_update_str: &str, is_operator: bool)`:
+ *   - Purpose: Helper to test adding/removing operators.
+ *   - Setup: Updates operator status, checks state and `operatorOf`.
+ *   - Assertions: Operator status matches expectation, one `UpdateOperator` event logged.
+ *
+ * - `test_0030_lpt_update_operator_add_success`:
+ *   - Purpose: Tests adding an operator.
+ *   - Setup: Calls `test_update_operator` with "add".
+ *   - Assertions: Operator is added, verified via state and `operatorOf`.
+ *
+ * - `test_0031_lpt_update_operator_remove_success`:
+ *   - Purpose: Tests removing an operator.
+ *   - Setup: Calls `test_update_operator` with "remove".
+ *   - Assertions: Operator is removed, verified via state and `operatorOf`.
+ *
+ * - `test_0040_lpt_balance_of`:
+ *   - Purpose: Tests querying LP token balances.
+ *   - Setup: Mints 1B tokens to `ADDRESS_USER`, checks balances before/after burning.
+ *   - Assertions: Balances are 1B for `ADDRESS_USER`, 0 for others, 0 after burn.
+ *   - Errors: Fails if balances are incorrect.
+ *
+ * - `test_0050_lp_liquidity`:
+ *   - Purpose: Tests adding and removing liquidity with specific amounts.
+ *   - Setup: Adds liquidity twice (1B CCD/3T tokens, 2B CCD/6T tokens), removes 3B LP tokens.
+ *   - Assertions: Verifies exchange states (CCD/token balances, LP supply), events (`Mint`, `Burn`).
+ *   - Errors: Fails if operations fail or balances/events are incorrect.
+ *
+ * - `test_0051_lp_liquidity`:
+ *   - Purpose: Tests adding liquidity with different amounts, includes debug prints.
+ *   - Setup: Adds liquidity twice (144M CCD/174M tokens, 100M CCD/120M tokens), checks balances.
+ *   - Assertions: Prints results for debugging, no strict assertions (incomplete test).
+ *   - Notes: Appears incomplete; consider adding assertions or removing debug prints for production.
+ *
+ * NOTES FOR DEVELOPERS:
+ * - Tests use mock CIS-2 behaviors to simulate token contract interactions; ensure mocks match real token contracts in production.
+ * - `test_0051_lp_liquidity` is incomplete; add assertions to verify behavior.
+ * - Extend tests for swap functions (`ccdToTokenSwap`, etc.) and error cases (e.g., non-CIS-2 tokens).
+ * - Use `claim_eq!` and `expect_error` for precise assertions; avoid panics with `.unwrap()` where possible.
+ */
 
 #[concordium_cfg_test]
 mod tests {
