@@ -89,7 +89,6 @@ impl schema::SchemaType for Event {
 
 #[derive(Serialize)]
 pub struct CreateLaunchPadEvent {
-    pub launchpad_id: u64,
     pub launchpad_name: String,
     pub owner: AccountAddress,
     pub allocated_tokens: TokenAmount,
@@ -98,13 +97,11 @@ pub struct CreateLaunchPadEvent {
 
 #[derive(Serialize)]
 pub struct ApproveEvent {
-    pub launchpad_id: u64,
     pub launchpad_name: String,
 }
 
 #[derive(Serialize)]
 pub struct RejectEvent {
-    pub launchpad_id: u64,
     pub launchpad_name: String,
 }
 
@@ -118,7 +115,6 @@ pub struct CliffEvent {
 
 #[derive(Serialize)]
 pub struct VestEvent {
-    pub launchpad_id: u64,
     pub launchpad_name: String,
     pub vesting_time: TimePeriod,
     pub vesting_limits: VestingLimits

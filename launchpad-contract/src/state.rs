@@ -4,16 +4,12 @@ use concordium_std::{
     HasCommonData, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder, StateMap,
     StateRef, StateRefMut, Timestamp,
 };
-use twox_hash::xxh3::hash64;
 
 use crate::{
     errors::LaunchPadError,
     params::{CreateParams, Months},
     ProductName,
 };
-
-/// Launch-pad unique ID generated from product name
-pub type LaunchPadID = u64;
 
 /// Alias for mutable state reference of a `LaunchPad` type
 pub type LaunchPadStateMut<'a> = StateRefMut<'a, LaunchPad, StateApi>;
@@ -31,15 +27,15 @@ pub const DAYS: u64 = 31;
 #[concordium(state_parameter = "S")]
 pub struct State<S = StateApi> {
     /// A mapping including all launchpad that have been added to this contract.
-    pub launchpads: StateMap<LaunchPadID, LaunchPad, S>,
+    pub launchpads: StateMap<ProductName, LaunchPad, S>,
     /// Container which holds the list of all the investors on the platform with
     /// associative list representing the launchpads in which they contribute
-    pub investors: StateMap<AccountAddress, Vec<LaunchPadID>, S>,
+    pub investors: StateMap<AccountAddress, Vec<ProductName>, S>,
     /// Admin details of the contract
     pub admin: Admin,
     /// A counter that is sequentially increased whenever a new launchpad is added to
     /// the contract.
-    pub counter: u16,
+    pub counter: u32,
 }
 
 impl State {
@@ -66,48 +62,42 @@ impl State {
         self.admin.liquidity_share()
     }
 
-    /// Gets the mutable reference to `LaunchPad` by product name with 
+    /// Gets the mutable reference to `LaunchPad` by product name with
     /// its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
     pub fn get_mut_launchpad(
         &mut self,
         product_name: String,
-    ) -> Result<(LaunchPadID, LaunchPadStateMut<'_>), LaunchPadError> {
-        let launch_pad_id = hash64(product_name.as_bytes());
-
-        if let Some(launchpad) = self.launchpads.get_mut(&launch_pad_id) {
-            return Ok((launch_pad_id, launchpad));
+    ) -> Result<LaunchPadStateMut<'_>, LaunchPadError> {
+        if let Some(launchpad) = self.launchpads.get_mut(&product_name) {
+            return Ok(launchpad);
         }
 
         Err(LaunchPadError::NotFound)
     }
 
-    /// Gets the immutable reference to `LaunchPad` by product name with 
+    /// Gets the immutable reference to `LaunchPad` by product name with
     /// its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
     pub fn get_launchpad(
         &self,
         product_name: String,
-    ) -> Result<(LaunchPadID, LaunchPadState<'_>), LaunchPadError> {
-        let launch_pad_id = hash64(product_name.as_bytes());
-        if let Some(launchpad) = self.launchpads.get(&launch_pad_id) {
-            return Ok((launch_pad_id, launchpad));
+    ) -> Result<LaunchPadState<'_>, LaunchPadError> {
+        if let Some(launchpad) = self.launchpads.get(&product_name) {
+            return Ok(launchpad);
         }
 
         Err(LaunchPadError::NotFound)
     }
 
-    /// Gets the mutable reference to `LaunchPad` by its associative ID
-    ///
-    /// Returns `LaunchPadError` if the LaunchPad does not exist.
-    pub fn get_launchpad_by_id(
-        &mut self,
-        id: u64,
-    ) -> Result<LaunchPadStateMut<'_>, LaunchPadError> {
-        if let Some(launchpad) = self.launchpads.get_mut(&id) {
-            return Ok(launchpad);
+    pub fn my_launch_pads(
+        &self,
+        holder: AccountAddress,
+    ) -> Result<Vec<ProductName>, LaunchPadError> {
+        if let Some(ids) = self.investors.get(&holder) {
+            return Ok(ids.clone());
         }
 
         Err(LaunchPadError::NotFound)
@@ -164,13 +154,13 @@ impl LaunchPad {
     pub fn from_create_params(
         params: CreateParams,
         state_builder: &mut StateBuilder,
-    ) -> (LaunchPadID, Self) {
+    ) -> (ProductName, Self) {
         let cliff = params
             .launchpad_end_time()
             .checked_add(Duration::from_days(params.lockup_details.cliff * DAYS))
             .unwrap();
         (
-            hash64(params.product.name.as_bytes()),
+            params.product.name.clone(),
             Self {
                 product: params.product,
                 timeperiod: params.timeperiod,
@@ -386,15 +376,15 @@ pub enum LaunchPadStatus {
 pub struct Admin {
     /// Admin account address to which all the fee
     /// must be transfered
-    address: AccountAddress,
+    pub address: AccountAddress,
     /// Platform registeration fee to be paid by product
-    registeration_fee: Amount,
+    pub registeration_fee: Amount,
     /// A certain percentage of shares to be paid by product
     /// once the soft-cap is reached in Tokens
-    allocation_share: u64,
+    pub allocation_share: u64,
     /// A certain percentage from LP tokens will be charged
     /// by the platform
-    liquidity_share: u64,
+    pub liquidity_share: u64,
 }
 
 impl Admin {
@@ -436,7 +426,7 @@ pub struct HolderInfo<S = StateApi> {
 ///
 /// Number of release cycles are actually the number of months chosen
 /// by the product owner for linear release of allocated tokens
-#[derive(Serialize, SchemaType, Debug)]
+#[derive(Serialize, SchemaType, Debug, Clone)]
 pub struct Lockup {
     /// Cliff duration of the launchpad based on
     /// number of months
@@ -454,7 +444,7 @@ pub struct Lockup {
 ///
 /// Number of release cycles are actually the number of months chosen
 /// by the product owner for linear release of allocated tokens
-#[derive(Serialize, SchemaType, Debug)]
+#[derive(Serialize, SchemaType, Debug, Clone)]
 pub struct LiquidityDetails {
     /// Amount of funds in percentage to be allocated and
     /// locked in liquidity within 40% to 60%
