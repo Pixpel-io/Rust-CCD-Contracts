@@ -385,6 +385,8 @@ pub struct Admin {
     /// A certain percentage from LP tokens will be charged
     /// by the platform
     pub liquidity_share: u64,
+    /// Platform DEX contract, to handle and manage the LPTokens
+    pub dex_address: ContractAddress
 }
 
 impl Admin {

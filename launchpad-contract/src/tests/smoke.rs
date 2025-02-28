@@ -1,10 +1,8 @@
 use crate::{
-    params::{ApprovalParams, CreateParams, LockupDetails},
-    state::{LiquidityDetails, Lockup, Product, TimePeriod, VestingLimits},
-    tests::{
+    errors::LaunchPadError, params::{ApprovalParams, CreateParams, LockupDetails}, state::{LiquidityDetails, Lockup, Product, TimePeriod, VestingLimits}, tests::{
         add_launch_pad, approve_launch_pad, deposit_tokens_to_launch_pad, get_launch_pad,
         get_token_balance, initialize_chain_and_launch_pad,
-    },
+    }
 };
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TransferParams};
 use concordium_std::{schema::SchemaType, Address, Amount, Timestamp};
@@ -92,4 +90,12 @@ fn launch_pad_smoke() {
 
     // let state = view_state(&chain, launch_pad_addr, ADMIN);
     // println!("{:#?}", state);
+}
+
+#[test]
+fn error_codes() {
+    ((-43)..=(-1))
+    .for_each(|code| {
+        println!("Error::{:?}", LaunchPadError::from(code))
+    });
 }

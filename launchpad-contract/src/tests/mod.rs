@@ -111,6 +111,7 @@ pub fn initialize_chain_and_launch_pad() -> (Chain, AccountKeys, ContractAddress
         registeration_fee: PLATFORM_REG_FEE,
         liquidity_share: LIQUID_SHARE,
         allocation_share: ALLOC_SHARE,
+        dex_address: ContractAddress::new(1001, 0)
     };
 
     let payload = InitContractPayload {
