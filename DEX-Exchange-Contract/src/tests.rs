@@ -793,6 +793,225 @@ mod tests {
         println!("{:?}", result);
 
     }
+    
+    // #[concordium_test]
+    // fn test_0060_ccd_to_token_swap_success() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000); // 100 CCD
+    //     let token_amount = ContractTokenAmount::from(200_000_000); // 200 tokens
+    //     let min_token_amount = ContractTokenAmount::from(190_000_000); // Minimum acceptable
 
+    //     // Add initial liquidity
+    //     host = mock_cis2_supports(host, get_token_index(1), true);
+    //     host = mock_cis2_operator_of(host, get_token_index(1), true);
+    //     host = mock_cis2_transfer(host, get_token_index(1));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_1.clone(), token_amount });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger).expect("Liquidity addition failed");
 
+    //     // Setup token balance for swap
+    //     host = mock_cis2_balance_of(host, get_token_index(1), HashMap::from([(Address::Contract(ContractAddress { index: SWAP_INDEX, subindex: 0 }), token_amount.0)]));
+    //     host.set_self_balance(ccd_amount);
+
+    //     // Perform swap
+    //     let parameter = to_bytes(&CcdToTokenSwapParams { token: token_1.clone(), min_token_amount });
+    //     ctx.set_parameter(&parameter);
+    //     let result = ccd_to_token_swap(&ctx, &mut host, ccd_amount, &mut logger);
+    //     claim!(result.is_ok(), "Swap failed unexpectedly");
+
+    //     // Verify state and events
+    //     let mut exchange_ctx = get_ctx(ADDRESS_USER);
+    //     exchange_ctx.set_parameter(&to_bytes(&GetExchangeParams { token: token_1.clone(), holder: ADDRESS_USER }));
+    //     let exchange = get_exchange(&exchange_ctx, &mut host).expect("Failed to get exchange");
+    //     // let mut ctx = get_ctx(ADDRESS_USER);
+    //     // ctx.set_parameter(&parameter);
+
+    //     // let result = get_exchange(&ctx, &mut host);
+    //     claim_eq!(exchange.ccd_balance.0, ccd_amount.micro_ccd * 2, "CCD balance should double");
+    //     claim!(exchange.token_balance.0 < token_amount.0, "Token balance should decrease");
+    //     claim_eq!(logger.logs.len(), 2, "Expected two events (Mint, Swap)");
+    //     claim!(
+    //         logger.logs.iter().any(|log| matches!(from_bytes::<Cis2Event<ContractTokenId, ContractTokenAmount>>(log), Ok(Cis2Event::Mint(_)))),
+    //         "Missing Mint event"
+    //     );
+    //     claim!(
+    //         logger.logs.iter().any(|log| matches!(from_bytes::<Event>(log), Ok(Event::Swap(_)))),
+    //         "Missing Swap event"
+    //     );
+    // }
+
+    // #[concordium_test]
+    // fn test_0061_ccd_to_token_swap_insufficient_output() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000);
+    //     let token_amount = ContractTokenAmount::from(200_000_000);
+    //     let min_token_amount = ContractTokenAmount::from(250_000_000); // Too high
+
+    //     host = mock_cis2_supports(host, get_token_index(1), true);
+    //     host = mock_cis2_operator_of(host, get_token_index(1), true);
+    //     host = mock_cis2_transfer(host, get_token_index(1));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_1.clone(), token_amount });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger).expect("Liquidity addition failed");
+
+    //     host = mock_cis2_balance_of(host, get_token_index(1), HashMap::from([(Address::Contract(ContractAddress { index: SWAP_INDEX, subindex: 0 }), token_amount.0)]));
+    //     let parameter = to_bytes(&CcdToTokenSwapParams { token: token_1.clone(), min_token_amount });
+    //     ctx.set_parameter(&parameter);
+    //     let result = ccd_to_token_swap(&ctx, &mut host, ccd_amount, &mut logger);
+    //     expect_error(result, ContractError::InsufficientOutputAmount, "Expected insufficient output error");
+    // }
+
+    // #[concordium_test]
+    // fn test_0062_ccd_to_token_swap_invalid_reserves() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000);
+    //     let min_token_amount = ContractTokenAmount::from(50_000_000);
+
+    //     // No liquidity added, reserves are zero
+    //     host = mock_cis2_balance_of(host, get_token_index(1), HashMap::from([(Address::Contract(ContractAddress { index: SWAP_INDEX, subindex: 0 }), 0)]));
+    //     let parameter = to_bytes(&CcdToTokenSwapParams { token: token_1.clone(), min_token_amount });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     let result = ccd_to_token_swap(&ctx, &mut host, ccd_amount, &mut logger);
+    //     expect_error(result, ContractError::InvalidReserves, "Expected invalid reserves error");
+    // }
+
+    // #[concordium_test]
+    // fn test_0070_token_to_ccd_swap_success() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000);
+    //     let token_amount = ContractTokenAmount::from(200_000_000);
+    //     let min_ccd_amount = ContractTokenAmount::from(90_000_000);
+
+    //     // Add liquidity
+    //     host = mock_cis2_supports(host, get_token_index(1), true);
+    //     host = mock_cis2_operator_of(host, get_token_index(1), true);
+    //     host = mock_cis2_transfer(host, get_token_index(1));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_1.clone(), token_amount });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger).expect("Liquidity addition failed");
+
+    //     // Setup for swap
+    //     host = mock_cis2_balance_of(host, get_token_index(1), HashMap::from([(Address::Contract(ContractAddress { index: SWAP_INDEX, subindex: 0 }), token_amount.0)]));
+    //     host.set_self_balance(ccd_amount);
+    //     let token_sold = ContractTokenAmount::from(token_amount.0 / 2); // Correct division
+    //     let parameter = to_bytes(&TokenToCcdSwapParams { token: token_1.clone(), token_sold, min_ccd_amount });
+    //     ctx.set_parameter(&parameter);
+    //     let result = token_to_ccd_swap(&ctx, &mut host, &mut logger);
+    //     claim!(result.is_ok(), "Swap failed unexpectedly");
+
+    //     // Verify state
+    //     let mut exchange_ctx = get_ctx(ADDRESS_USER);
+    //     exchange_ctx.set_parameter(&to_bytes(&GetExchangeParams { token: token_1.clone(), holder: ADDRESS_USER }));
+    //     let exchange = get_exchange(&exchange_ctx, &mut host).expect("Failed to get exchange");
+    //     claim!(exchange.ccd_balance.0 < ccd_amount.micro_ccd, "CCD balance should decrease");
+    //     claim!(exchange.token_balance.0 > token_amount.0, "Token balance should increase");
+    // }
+
+    // #[concordium_test]
+    // fn test_0071_token_to_ccd_swap_not_operator() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000);
+    //     let token_amount = ContractTokenAmount::from(200_000_000);
+    //     let min_ccd_amount = ContractTokenAmount::from(90_000_000);
+
+    //     // Add liquidity with operator
+    //     host = mock_cis2_supports(host, get_token_index(1), true);
+    //     host = mock_cis2_operator_of(host, get_token_index(1), false); // User not an operator
+    //     host = mock_cis2_transfer(host, get_token_index(1));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_1.clone(), token_amount });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger).expect("Liquidity addition failed");
+
+    //     // Attempt swap without operator status
+    //     let token_sold = ContractTokenAmount::from(token_amount.0 / 2); // Correct division
+    //     let parameter = to_bytes(&TokenToCcdSwapParams { token: token_1.clone(), token_sold, min_ccd_amount });
+    //     ctx.set_parameter(&parameter);
+    //     let result = token_to_ccd_swap(&ctx, &mut host, &mut logger);
+    //     expect_error(result, ContractError::NotOperator, "Expected not operator error");
+    // }
+
+    // #[concordium_test]
+    // fn test_0080_token_to_token_swap_success() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let token_2 = get_token(2);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000);
+    //     let token_amount_1 = ContractTokenAmount::from(200_000_000);
+    //     let token_amount_2 = ContractTokenAmount::from(300_000_000);
+    //     let token_sold = ContractTokenAmount::from(100_000_000);
+    //     let min_purchased = ContractTokenAmount::from(90_000_000);
+
+    //     // Add liquidity for token_1
+    //     host = mock_cis2_supports(host, get_token_index(1), true);
+    //     host = mock_cis2_operator_of(host, get_token_index(1), true);
+    //     host = mock_cis2_transfer(host, get_token_index(1));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_1.clone(), token_amount: token_amount_1 });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger).expect("Liquidity addition failed for token_1");
+
+    //     // Add liquidity for token_2
+    //     host = mock_cis2_supports(host, get_token_index(2), true);
+    //     host = mock_cis2_operator_of(host, get_token_index(2), true);
+    //     host = mock_cis2_transfer(host, get_token_index(2));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_2.clone(), token_amount: token_amount_2 });
+    //     ctx.set_parameter(&parameter);
+    //     lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger).expect("Liquidity addition failed for token_2");
+
+    //     // Setup balances for swap
+    //     host = mock_cis2_balance_of(host, get_token_index(1), HashMap::from([(Address::Contract(ContractAddress { index: SWAP_INDEX, subindex: 0 }), token_amount_1.0)]));
+    //     host = mock_cis2_balance_of(host, get_token_index(2), HashMap::from([(Address::Contract(ContractAddress { index: SWAP_INDEX, subindex: 0 }), token_amount_2.0)]));
+    //     host.set_self_balance(ccd_amount * 2);
+
+    //     // Perform token-to-token swap
+    //     let parameter = to_bytes(&TokenToTokenSwapParams { token: token_1.clone(), purchased_token: token_2.clone(), token_sold, min_purchased_token_amount: min_purchased });
+    //     ctx.set_parameter(&parameter);
+    //     let result = token_to_token_swap(&ctx, &mut host, &mut logger);
+    //     claim!(result.is_ok(), "Swap failed unexpectedly");
+
+    //     // Verify state
+    //     let mut exchange_ctx_1 = get_ctx(ADDRESS_USER);
+    //     exchange_ctx_1.set_parameter(&to_bytes(&GetExchangeParams { token: token_1.clone(), holder: ADDRESS_USER }));
+    //     let exchange_1 = get_exchange(&exchange_ctx_1, &mut host).expect("Failed to get exchange 1");
+    //     let mut exchange_ctx_2 = get_ctx(ADDRESS_USER);
+    //     exchange_ctx_2.set_parameter(&to_bytes(&GetExchangeParams { token: token_2.clone(), holder: ADDRESS_USER }));
+    //     let exchange_2 = get_exchange(&exchange_ctx_2, &mut host).expect("Failed to get exchange 2");
+    //     claim!(exchange_1.token_balance.0 > token_amount_1.0, "Token 1 balance should increase");
+    //     claim!(exchange_2.token_balance.0 < token_amount_2.0, "Token 2 balance should decrease");
+    // }
+
+    // #[concordium_test]
+    // fn test_0090_add_liquidity_non_cis2_token() {
+    //     let mut logger = TestLogger::init();
+    //     let mut host = get_host();
+    //     let token_1 = get_token(1);
+    //     let ccd_amount = Amount::from_micro_ccd(100_000_000);
+    //     let token_amount = ContractTokenAmount::from(200_000_000);
+
+    //     // Mock non-CIS-2 token
+    //     host = mock_cis2_supports(host, get_token_index(1), false); // Not CIS-2 compliant
+    //     host = mock_cis2_operator_of(host, get_token_index(1), true);
+    //     host = mock_cis2_transfer(host, get_token_index(1));
+    //     let parameter = to_bytes(&AddLiquidityParams { token: token_1.clone(), token_amount });
+    //     let mut ctx = get_ctx(ADDRESS_USER);
+    //     ctx.set_parameter(&parameter);
+    //     let result = lp_add_liquidity(&ctx, &mut host, ccd_amount, &mut logger);
+    //     expect_error(result, ContractError::TokenNotCis2, "Expected non-CIS-2 token error");
+    // }
 }
