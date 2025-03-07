@@ -83,3 +83,7 @@ impl From<Product> for ProductView {
         }
     }
 }
+
+
+#[derive(Serialize, SchemaType, Debug)]
+pub struct LPTokenInfo;

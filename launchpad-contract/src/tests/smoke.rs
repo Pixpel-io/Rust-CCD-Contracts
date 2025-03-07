@@ -1,17 +1,30 @@
+use core::{marker::PhantomData, str::FromStr};
+
 use crate::{
-    errors::LaunchPadError, params::{ApprovalParams, CreateParams, LockupDetails}, state::{LiquidityDetails, Lockup, Product, TimePeriod, VestingLimits}, tests::{
+    errors::LaunchPadError,
+    params::{ApprovalParams, CreateParams, LockupDetails},
+    state::{LiquidityDetails, Lockup, Product, TimePeriod, VestingLimits},
+    tests::{
         add_launch_pad, approve_launch_pad, deposit_tokens_to_launch_pad, get_launch_pad,
-        get_token_balance, initialize_chain_and_launch_pad,
-    }
+        get_token_balance, initialize_chain_and_launch_pad, initialize_contract,
+    },
 };
-use concordium_cis2::{TokenAmountU64 as TokenAmount, TransferParams};
-use concordium_std::{schema::SchemaType, Address, Amount, Timestamp};
+use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdVec, TransferParams};
+use concordium_smart_contract_testing::UpdateContractPayload;
+use concordium_std::{schema::SchemaType, Address, Amount, ContractAddress, Deserial, OwnedParameter, OwnedReceiveName, SchemaType, Serial, Timestamp};
 
 use super::{mint_token, view_state, ADMIN, OWNER, OWNER_TOKEN_ID, OWNER_TOKEN_URL};
 
 #[test]
 fn launch_pad_smoke() {
     let (mut chain, _, launch_pad_addr, cis2_addr) = initialize_chain_and_launch_pad();
+
+    let dex_contract = initialize_contract::<PhantomData<u8>>(
+        &mut chain,
+        "module_path".into(),
+        "pixpel_swap".into(),
+        None,
+    );
 
     mint_token(
         &mut chain,
@@ -94,8 +107,53 @@ fn launch_pad_smoke() {
 
 #[test]
 fn error_codes() {
-    ((-43)..=(-1))
-    .for_each(|code| {
-        println!("Error::{:?}", LaunchPadError::from(code))
-    });
+    ((-43)..=(-1)).for_each(|code| println!("Error::{:?}", LaunchPadError::from(code)));
+}
+
+#[derive(Serial, Deserial, SchemaType, Clone, Debug)]
+struct TokenInfo {
+    pub id: TokenIdVec,
+    pub address: ContractAddress,
+}
+
+#[derive(Serial, Deserial, SchemaType)]
+struct AddLiquidityParams {
+    pub token: TokenInfo,
+    pub token_amount: TokenAmount,
+}
+
+#[test]
+fn dex_liqui_smoke() {
+    let (mut chain, _, launch_pad_addr, cis2_addr) = initialize_chain_and_launch_pad();
+
+    let dex_contract = initialize_contract::<PhantomData<u8>>(
+        &mut chain,
+        "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
+        "pixpel_swap".into(),
+        None,
+    );
+
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_addr,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let liquidity_params = AddLiquidityParams {
+        token: TokenInfo {
+            id: TokenIdVec(OWNER_TOKEN_ID.0.to_ne_bytes().into()),
+            address: cis2_addr
+        },
+        token_amount: 10000.into()
+    };
+
+    let payload = UpdateContractPayload {
+        amount: Amount::from_ccd(10000),
+        receive_name: OwnedReceiveName::new_unchecked("pixpel_swap.addLiquidity".to_string()),
+        address: dex_contract,
+        message: OwnedParameter::from_serial(&liquidity_params)
+            .expect("[Error] Unable to serialize UpdateOperator params"),
+    };
 }

@@ -1,5 +1,5 @@
 use crate::{state::{Admin, LiquidityDetails, Product, TimePeriod, VestingLimits, DAYS}, ProductName};
-use concordium_cis2::TokenAmountU64 as TokenAmount;
+use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdVec};
 use concordium_std::*;
 
 pub type Months = u64;
@@ -94,6 +94,17 @@ pub struct VestParams {
     pub token_amount: TokenAmount,
 }
 
+#[derive(Serial, Deserial, SchemaType)]
+pub struct AddLiquidityParams {
+    pub token: TokenInfo,
+    pub token_amount: TokenAmount,
+}
+
+#[derive(Serial, Deserial, SchemaType, Clone, Debug)]
+pub struct TokenInfo {
+    pub id: TokenIdVec,
+    pub address: ContractAddress,
+}
 // #[derive(Serial, Deserial, SchemaType)]
 // pub struct ClaimTokenParams {
 //     pub id: TokenID,

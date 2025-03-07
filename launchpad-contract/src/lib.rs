@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 use concordium_cis2::{
     AdditionalData, Cis2Client, OnReceivingCis2Params, TokenAmountU64 as TokenAmount,
-    TokenIdU8 as TokenID, Transfer,
+    TokenIdU8 as TokenID, TokenIdVec, Transfer,
 };
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
@@ -12,8 +12,11 @@ use concordium_std::{
 };
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
-use params::{ApprovalParams, CreateParams, InitParams, LivePauseParams, VestParams};
-use response::{AllLaunchPads, LaunchPadView, LaunchPadsView, StateView};
+use params::{
+    AddLiquidityParams, ApprovalParams, CreateParams, InitParams, LivePauseParams, TokenInfo,
+    VestParams,
+};
+use response::{AllLaunchPads, LaunchPadView, LaunchPadsView, LPTokenInfo, StateView};
 use state::{HolderInfo, LaunchPad, LaunchPadStatus, State, TimePeriod};
 // use types::ContractResult;
 
@@ -672,6 +675,24 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // to lock the funds before trasfering the funds to the owner
         //
         // And pay the the LPTokens bought from the DEX to admin
+        let liquidity_params = AddLiquidityParams {
+            token: TokenInfo {
+                id: TokenIdVec(launch_pad.get_product_token_id().0.to_ne_bytes().into()),
+                address: launch_pad.get_cis2_contract(),
+            },
+            token_amount: TokenAmount::from(100),
+        };
+
+        let _: LPTokenInfo = host
+            .invoke_contract(
+                &host.state().dex_address(),
+                &liquidity_params,
+                EntrypointName::new_unchecked("addLiquidity"),
+                Amount::zero(),
+            )?
+            .1
+            .unwrap()
+            .get()?;
 
         // Transfering the withdrawable amount to the owner
         host.invoke_transfer(&owner, withdrawable)?;

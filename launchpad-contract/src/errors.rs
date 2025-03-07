@@ -1,7 +1,6 @@
 use concordium_cis2::{Cis2ClientError, Cis2Error};
 use concordium_std::{
-    CallContractError, LogError, ParseError, Reject, SchemaType, Serialize, TransferError,
-    UnwrapAbort,
+    CallContractError, Deserial, LogError, ParseError, Reject, SchemaType, Serialize, TransferError, UnwrapAbort
 };
 
 pub mod num {
@@ -88,8 +87,8 @@ impl From<Cis2ClientError<LaunchPadError>> for LaunchPadError {
 }
 
 /// Mapping CallContractError<ExternCallResponse> to Error.
-impl From<CallContractError<Cis2Error<LaunchPadError>>> for LaunchPadError {
-    fn from(e: CallContractError<Cis2Error<LaunchPadError>>) -> Self {
+impl<T> From<CallContractError<T>> for LaunchPadError {
+    fn from(e: CallContractError<T>) -> Self {
         match e {
             CallContractError::AmountTooLarge => Self::AmountTooLarge,
             CallContractError::MissingAccount => Self::MissingAccount,

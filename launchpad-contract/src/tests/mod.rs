@@ -15,7 +15,7 @@ use concordium_smart_contract_testing::{
     UpdateContractPayload,
 };
 use concordium_std::{
-    AccountAddress, AccountBalance, Address, Amount, ContractAddress, MetadataUrl,
+    AccountAddress, AccountBalance, Address, Amount, ContractAddress, Deserial, MetadataUrl,
     OwnedContractName, OwnedEntrypointName, OwnedParameter, OwnedReceiveName, SchemaType, Serial,
     ACCOUNT_ADDRESS_SIZE,
 };
@@ -111,7 +111,7 @@ pub fn initialize_chain_and_launch_pad() -> (Chain, AccountKeys, ContractAddress
         registeration_fee: PLATFORM_REG_FEE,
         liquidity_share: LIQUID_SHARE,
         allocation_share: ALLOC_SHARE,
-        dex_address: ContractAddress::new(1001, 0)
+        dex_address: ContractAddress::new(1001, 0),
     };
 
     let payload = InitContractPayload {
@@ -133,6 +133,111 @@ pub fn initialize_chain_and_launch_pad() -> (Chain, AccountKeys, ContractAddress
         init_launch_pad.contract_address,
         token.contract_address,
     )
+}
+
+fn initialize_contract<P>(
+    chain: &mut Chain,
+    module_path: String,
+    contract_name: String,
+    init_params: Option<P>,
+) -> ContractAddress
+where
+    P: Serial,
+{
+    let module = module_load_v1(module_path.as_str()).expect("[Error] Unable to load module");
+    let deploy = chain
+        .module_deploy_v1(SIGNER, ADMIN, module)
+        .expect("[Error] Unable to deploy");
+
+    let owned_params = if let Some(params) = init_params {
+        OwnedParameter::from_serial(&params).expect("[Error] Deserialization init params")
+    } else {
+        OwnedParameter::empty()
+    };
+
+    let payload = InitContractPayload {
+        amount: Amount::zero(),
+        mod_ref: deploy.module_reference,
+        init_name: OwnedContractName::new_unchecked(format!("init_{}", contract_name)),
+        param: owned_params,
+    };
+
+    chain
+        .contract_init(SIGNER, ADMIN, Energy::from(10000), payload)
+        .expect("[Error] Unable to initialize contract")
+        .contract_address
+}
+
+fn update_contract<P, R>(
+    chain: &mut Chain,
+    contract: ContractAddress,
+    invoker: AccountAddress,
+    params: P,
+    payable: Option<Amount>,
+    receive_name: OwnedReceiveName,
+) -> Result<R, LaunchPadError>
+where
+    P: Serial,
+    R: Deserial,
+{
+    let amount = match payable {
+        Some(amount) => amount,
+        None => Amount::zero(),
+    };
+
+    let payload = UpdateContractPayload {
+        amount,
+        address: contract,
+        receive_name,
+        message: OwnedParameter::from_serial(&params).unwrap(),
+    };
+
+    let result = chain.contract_update(
+        SIGNER,
+        invoker,
+        Address::Account(invoker),
+        Energy::from(10000),
+        payload,
+    );
+
+    match result {
+        Ok(success) => match success.parse_return_value() {
+            Ok(ret_type) => Ok(ret_type),
+            Err(pe) => Err(pe.into()),
+        },
+        Err(ce) => Err(ce.into()),
+    }
+}
+
+fn read_contract<P, R>(
+    chain: &mut Chain,
+    contract: ContractAddress,
+    invoker: AccountAddress,
+    params: P,
+    receive_name: OwnedReceiveName,
+) -> R
+where
+    P: Serial,
+    R: Deserial,
+{
+    let payload = UpdateContractPayload {
+        amount: Amount::zero(),
+        receive_name,
+        address: contract,
+        message: OwnedParameter::from_serial(&params).expect("BalanceOf params"),
+    };
+
+    let result = chain.contract_invoke(
+        invoker,
+        Address::Account(invoker),
+        Energy::from(10000),
+        payload,
+    );
+
+    result
+        .unwrap()
+        .parse_return_value()
+        .expect("[Error] Unable to deserialize")
 }
 
 /// The parameter for the contract function `mint` which mints/airdrops a number

@@ -62,6 +62,10 @@ impl State {
         self.admin.liquidity_share()
     }
 
+    pub fn dex_address(&self) -> ContractAddress {
+        self.admin.dex_address
+    }
+
     /// Gets the mutable reference to `LaunchPad` by product name with
     /// its associative ID
     ///
