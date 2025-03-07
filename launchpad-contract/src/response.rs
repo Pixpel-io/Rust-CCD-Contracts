@@ -1,10 +1,9 @@
 use crate::{
-    state::{
+    params::TokenInfo, state::{
         Admin, LaunchPadState, LaunchPadStatus, LiquidityDetails, Lockup, Product, VestingLimits,
-    },
-    ProductName,
+    }, ProductName
 };
-use concordium_cis2::TokenAmountU64 as TokenAmount;
+use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU64};
 use concordium_std::{AccountAddress, Amount, SchemaType, Serialize};
 
 // #[derive(Serialize, SchemaType)]
@@ -84,6 +83,15 @@ impl From<Product> for ProductView {
     }
 }
 
+#[derive(Serialize, SchemaType, Debug)]
+pub struct ExchangeView {
+    pub token:  TokenInfo,
+    pub token_balance: TokenAmount,
+    pub ccd_balance: TokenAmount,
+    pub lp_token_id: TokenIdU64,
+    pub lp_tokens_supply: TokenAmount,
+    pub lp_tokens_holder_balance: TokenAmount,
+}
 
 #[derive(Serialize, SchemaType, Debug)]
 pub struct LPTokenInfo;

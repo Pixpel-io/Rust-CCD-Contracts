@@ -105,6 +105,12 @@ pub struct TokenInfo {
     pub id: TokenIdVec,
     pub address: ContractAddress,
 }
+
+#[derive(Serial, Deserial, SchemaType)]
+pub struct GetExchangeParams {
+    pub holder: Address,
+    pub token: TokenInfo,
+}
 // #[derive(Serial, Deserial, SchemaType)]
 // pub struct ClaimTokenParams {
 //     pub id: TokenID,

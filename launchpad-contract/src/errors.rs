@@ -1,6 +1,6 @@
-use concordium_cis2::{Cis2ClientError, Cis2Error};
+use concordium_cis2::Cis2ClientError;
 use concordium_std::{
-    CallContractError, Deserial, LogError, ParseError, Reject, SchemaType, Serialize, TransferError, UnwrapAbort
+    CallContractError, LogError, ParseError, Reject, SchemaType, Serialize, TransferError, UnwrapAbort
 };
 
 pub mod num {
@@ -122,7 +122,7 @@ impl From<ContractInvokeError> for LaunchPadError {
                 panic!("[Error] Unable to map received invocation error code")
             }
         } else {
-            panic!("[Error] Unable to map ContractInvokeError other than ExecutionError")
+            panic!("[Error] Unable to map ContractInvokeError other than ExecutionError {:#?}", value)
         }
     }
 }

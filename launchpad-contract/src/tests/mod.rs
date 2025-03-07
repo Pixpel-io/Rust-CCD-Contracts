@@ -30,7 +30,7 @@ mod smoke;
 const SIGNER: Signer = Signer::with_one_key();
 
 /// Account balance to initilize the test accounts
-const ACC_INITIAL_BALANCE: Amount = Amount::from_ccd(10000);
+const ACC_INITIAL_BALANCE: Amount = Amount::from_ccd(20000);
 
 const ADMIN: AccountAddress = AccountAddress([1; ACCOUNT_ADDRESS_SIZE]);
 const OWNER: AccountAddress = AccountAddress([2; ACCOUNT_ADDRESS_SIZE]);
@@ -139,7 +139,7 @@ fn initialize_contract<P>(
     chain: &mut Chain,
     module_path: String,
     contract_name: String,
-    init_params: Option<P>,
+    init_params: P,
 ) -> ContractAddress
 where
     P: Serial,
@@ -149,11 +149,7 @@ where
         .module_deploy_v1(SIGNER, ADMIN, module)
         .expect("[Error] Unable to deploy");
 
-    let owned_params = if let Some(params) = init_params {
-        OwnedParameter::from_serial(&params).expect("[Error] Deserialization init params")
-    } else {
-        OwnedParameter::empty()
-    };
+    let owned_params = OwnedParameter::from_serial(&init_params).unwrap();
 
     let payload = InitContractPayload {
         amount: Amount::zero(),
@@ -174,7 +170,7 @@ fn update_contract<P, R>(
     invoker: AccountAddress,
     params: P,
     payable: Option<Amount>,
-    receive_name: OwnedReceiveName,
+    receive_name: &str,
 ) -> Result<R, LaunchPadError>
 where
     P: Serial,
@@ -188,7 +184,7 @@ where
     let payload = UpdateContractPayload {
         amount,
         address: contract,
-        receive_name,
+        receive_name: OwnedReceiveName::new_unchecked(receive_name.to_string()),
         message: OwnedParameter::from_serial(&params).unwrap(),
     };
 
@@ -214,7 +210,7 @@ fn read_contract<P, R>(
     contract: ContractAddress,
     invoker: AccountAddress,
     params: P,
-    receive_name: OwnedReceiveName,
+    receive_name: &str,
 ) -> R
 where
     P: Serial,
@@ -222,8 +218,8 @@ where
 {
     let payload = UpdateContractPayload {
         amount: Amount::zero(),
-        receive_name,
         address: contract,
+        receive_name: OwnedReceiveName::new_unchecked(receive_name.to_string()),
         message: OwnedParameter::from_serial(&params).expect("BalanceOf params"),
     };
 
@@ -252,6 +248,17 @@ pub struct MintParams {
     pub token_id: TokenID,
     /// Additional data that can be sent to the receiving contract.
     pub data: AdditionalData,
+}
+
+impl From<(AccountAddress, TokenID, String)> for MintParams {
+    fn from(value: (AccountAddress, TokenID, String)) -> Self {
+        Self {
+            to: Receiver::from_account(value.0),
+            metadata_url: MetadataUrl { url: value.2, hash: None },
+            token_id: value.1,
+            data: AdditionalData::empty()
+        }
+    }
 }
 
 /// A helper function which invokes `cis2_multi` contract to `mint` airdrop tokens for the given

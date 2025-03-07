@@ -16,7 +16,7 @@ use params::{
     AddLiquidityParams, ApprovalParams, CreateParams, InitParams, LivePauseParams, TokenInfo,
     VestParams,
 };
-use response::{AllLaunchPads, LaunchPadView, LaunchPadsView, LPTokenInfo, StateView};
+use response::{AllLaunchPads, LPTokenInfo, LaunchPadView, LaunchPadsView, StateView};
 use state::{HolderInfo, LaunchPad, LaunchPadStatus, State, TimePeriod};
 // use types::ContractResult;
 

@@ -390,7 +390,7 @@ pub struct Admin {
     /// by the platform
     pub liquidity_share: u64,
     /// Platform DEX contract, to handle and manage the LPTokens
-    pub dex_address: ContractAddress
+    pub dex_address: ContractAddress,
 }
 
 impl Admin {
