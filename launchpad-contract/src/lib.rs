@@ -1,7 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 use concordium_cis2::{
-    AdditionalData, Cis2Client, OnReceivingCis2Params, TokenAmountU64 as TokenAmount,
-    TokenIdU8 as TokenID, TokenIdVec, Transfer,
+    AdditionalData, Cis2Client, Cis2ClientError, OnReceivingCis2Params, OperatorUpdate,
+    TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, TokenIdVec, Transfer,
+    TransferParams, UpdateOperator, UpdateOperatorParams,
 };
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
@@ -13,11 +14,11 @@ use concordium_std::{
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
 use params::{
-    AddLiquidityParams, ApprovalParams, CreateParams, InitParams, LivePauseParams, TokenInfo,
-    VestParams,
+    AddLiquidityParams, ApprovalParams, ClaimLockedParams, Claimer, CreateParams,
+    GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
 };
-use response::{AllLaunchPads, LPTokenInfo, LaunchPadView, LaunchPadsView, StateView};
-use state::{HolderInfo, LaunchPad, LaunchPadStatus, State, TimePeriod};
+use response::{AllLaunchPads, ExchangeView, LaunchPadView, LaunchPadsView, StateView};
+use state::{HolderInfo, LaunchPad, LaunchPadStatus, LiquidityDetails, Release, State, TimePeriod};
 // use types::ContractResult;
 
 // mod contract;
@@ -420,7 +421,10 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
                 tokens: params.token_amount,
                 invested: amount,
                 cycles_rolled: 0,
-                release_data: state_builder.new_map(),
+                release_data: Release {
+                    unlocked: state_builder.new_map(),
+                    locked: state_builder.new_map(),
+                },
             });
         }
         // If holder already exist in the launch pad, then
@@ -560,7 +564,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
                 .unwrap()
                 .millis()
                 >= CYCLE_DURATION,
-            LaunchPadError::CycleNotElapsed
+            LaunchPadError::NotElapsed
         );
 
         // Return the current release cycle count and amount of
@@ -568,7 +572,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
         (1, holder_info.tokens.0 / launch_pad.lock_up.release_cycles)
     } else {
         let last_cycle = holder_info.cycles_rolled;
-        let last_released = holder_info.release_data.get(&last_cycle).unwrap();
+        let last_released = holder_info.release_data.unlocked.get(&last_cycle).unwrap();
 
         // Ensuring that holder is not exceeding the claims more
         // than the number of release cycles.
@@ -580,7 +584,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
         );
         ensure!(
             time_now.duration_since(last_released.1).unwrap().millis() >= CYCLE_DURATION,
-            LaunchPadError::CycleNotElapsed
+            LaunchPadError::NotElapsed
         );
 
         // Return the current release cycle count and amount of
@@ -593,7 +597,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
 
     // Setting the release information regarding the current release
     // being made for the current holder
-    launch_pad.set_holder_release_info(holder, cycle, (claimable.into(), time_now));
+    launch_pad.set_holder_release_info_unlocked(holder, cycle, (claimable.into(), time_now));
 
     let cis2_client = Cis2Client::new(launch_pad.get_cis2_contract());
     let token_id = launch_pad.get_product_token_id();
@@ -660,63 +664,188 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // Calculating the amount of funds in CCD to be locked
         // in liquidity according to the percentage provided by
         // the owner
-        let liquidity_allocation = Amount::from_micro_ccd(
+        let ccd_lp_alloc = Amount::from_micro_ccd(
             (launch_pad.collected.micro_ccd * launch_pad.liquidity_details.liquidity_allocation)
                 / 100,
         );
 
+        let token_lp_alloc = launch_pad.product_base_price().micro_ccd / ccd_lp_alloc.micro_ccd;
+
         // Remaining amount in CCD that can be withdrawn after the
         // allocation
-        let withdrawable = launch_pad.collected - liquidity_allocation;
+        let withdrawable = launch_pad.collected - ccd_lp_alloc;
 
+        let token_id = launch_pad.get_product_token_id();
+        let cis2_contract = launch_pad.get_cis2_contract();
+        let dex_contract = host.state().dex_address();
+        let raised_funds_ccd = launch_pad.collected;
+        let liquidity_details = launch_pad.liquidity_details.clone();
         // TODO
         //
         // Need to implement the liquidity logic with DEX integration
         // to lock the funds before trasfering the funds to the owner
         //
         // And pay the the LPTokens bought from the DEX to admin
-        let liquidity_params = AddLiquidityParams {
-            token: TokenInfo {
-                id: TokenIdVec(launch_pad.get_product_token_id().0.to_ne_bytes().into()),
-                address: launch_pad.get_cis2_contract(),
-            },
-            token_amount: TokenAmount::from(100),
-        };
+        let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
+            cis2_contract,
+        )
+        .update_operator(host, host.state().dex_address().into(), OperatorUpdate::Add);
 
-        let _: LPTokenInfo = host
+        match response {
+            Ok(added) => {
+                ensure!(added, LaunchPadError::UpdateOperatorFailed)
+            }
+            Err(e) => {
+                bail!(e.into())
+            }
+        }
+
+        host.invoke_contract(
+            &dex_contract,
+            &AddLiquidityParams {
+                token: TokenInfo {
+                    id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+                    address: cis2_contract,
+                },
+                token_amount: token_lp_alloc.into(),
+            },
+            EntrypointName::new_unchecked("addLiquidity"),
+            ccd_lp_alloc,
+        )?;
+
+        let exchange: ExchangeView = host
             .invoke_contract(
-                &host.state().dex_address(),
-                &liquidity_params,
-                EntrypointName::new_unchecked("addLiquidity"),
+                &dex_contract,
+                &GetExchangeParams {
+                    holder: Address::Contract(ctx.self_address()),
+                    token: TokenInfo {
+                        id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+                        address: cis2_contract,
+                    },
+                },
+                EntrypointName::new_unchecked("getExchange"),
                 Amount::zero(),
             )?
             .1
             .unwrap()
             .get()?;
 
+        let platform_lp_share =
+            (exchange.lp_tokens_supply * host.state().admin_liquidity_share()).0 / 100;
+
+        let lp_allocated = exchange.lp_tokens_supply - platform_lp_share.into();
+
+        host.invoke_contract(
+            &dex_contract,
+            &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+                token_id: exchange.lp_token_id,
+                amount: platform_lp_share.into(),
+                from: ctx.self_address().into(),
+                to: concordium_cis2::Receiver::Account(host.state().admin_address()),
+                data: AdditionalData::empty(),
+            }]),
+            EntrypointName::new_unchecked("transfer"),
+            Amount::zero(),
+        )?;
+
         // Transfering the withdrawable amount to the owner
         host.invoke_transfer(&owner, withdrawable)?;
         // Set the withdrawn flag in launchpad state
         host.state_mut()
-            .get_mut_launchpad(product_name)
+            .get_mut_launchpad(product_name.clone())
             .unwrap()
             .withdrawn = true;
+
+        for (_, mut holder_info) in host
+            .state_mut()
+            .get_mut_launchpad(product_name)
+            .unwrap()
+            .get_holders_mut()
+        {
+            let holder_contribution =
+                (holder_info.invested.micro_ccd / raised_funds_ccd.micro_ccd) * 100;
+            let holder_lp_share = (lp_allocated * holder_contribution).0 / 100;
+
+            for cycle_count in 0..liquidity_details.release_cycles {
+                let lp_amount = holder_lp_share / liquidity_details.release_cycles;
+
+                let _ = holder_info.release_data.locked.insert(
+                    (cycle_count + 1) as u8,
+                    (
+                        lp_amount.into(),
+                        exchange.lp_token_id,
+                        Timestamp::now(),
+                        false,
+                    ),
+                );
+            }
+        }
 
         return Ok(());
     }
 
-    Err(LaunchPadError::WithDrawn)
+    Err(LaunchPadError::Claimed)
 }
 
 #[receive(
     contract = "LaunchPad",
     name = "WithDrawLockedFunds",
     mutable,
-    parameter = "String",
+    parameter = "ClaimLockedParams",
     error = "LaunchPadError"
 )]
 fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
-    todo!("NOT YET IMPLEMENTED")
+    let sender = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+    };
+
+    let claim_params: ClaimLockedParams = ctx.parameter_cursor().get()?;
+
+    match claim_params.claimer {
+        Claimer::OWNER => {
+            unimplemented!("Need to clear about the owner locked funds claim policy")
+        }
+        Claimer::HOLDER(cycle) => {
+            if let Some(locked_cycle_details) = host
+                .state()
+                .get_launchpad(claim_params.product_name.clone())?
+                .get_holder_info(sender)?
+                .release_data
+                .locked
+                .get(&cycle)
+            {
+                let (token_amount, lp_token_id, timestamp, claimed) = *locked_cycle_details;
+
+                ensure!(claimed, LaunchPadError::Claimed);
+                ensure!(
+                    ctx.metadata().block_time() <= timestamp,
+                    LaunchPadError::NotElapsed
+                );
+
+                host.invoke_contract(
+                    &host.state().dex_address(),
+                    &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+                        token_id: lp_token_id,
+                        amount: token_amount,
+                        from: ctx.self_address().into(),
+                        to: concordium_cis2::Receiver::Account(sender),
+                        data: AdditionalData::empty(),
+                    }]),
+                    EntrypointName::new_unchecked("transfer"),
+                    Amount::zero(),
+                )?;
+
+                host.state_mut()
+                    .get_mut_launchpad(claim_params.product_name)?
+                    .set_holder_release_info_locked(sender, cycle, true);
+
+                return Ok(())
+            }
+            
+            bail!(LaunchPadError::InCorrect)
+        }
+    }
 }
 
 #[receive(

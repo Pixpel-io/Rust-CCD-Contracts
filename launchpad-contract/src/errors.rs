@@ -15,7 +15,7 @@ pub enum LaunchPadError {
     Parse,
     Insufficient,
     SmallerHardCap,
-    InCorrectTimePeriod,
+    InCorrect,
     InCorrectCliffPeriod,
     ProductNameAlreadyTaken,
     OnlyAccount,
@@ -36,9 +36,9 @@ pub enum LaunchPadError {
     Finished,
     Vesting,
     UnableToCancel,
-    WithDrawn,
+    Claimed,
     CliffNotElapsed,
-    CycleNotElapsed,
+    NotElapsed,
     TimeStillLeft,
     PauseLimit,
     PauseDuration,
@@ -55,6 +55,7 @@ pub enum LaunchPadError {
     Trap,
     CyclesCompleted,
     Completed,
+    UpdateOperatorFailed,
 }
 
 impl From<TransferError> for LaunchPadError {

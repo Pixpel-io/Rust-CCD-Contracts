@@ -111,6 +111,19 @@ pub struct GetExchangeParams {
     pub holder: Address,
     pub token: TokenInfo,
 }
+
+#[derive(Serial, Deserial, SchemaType)]
+pub enum Claimer {
+    OWNER,
+    HOLDER(u8)
+}
+
+#[derive(Serial, Deserial, SchemaType)]
+pub struct ClaimLockedParams {
+    pub claimer: Claimer,
+    pub product_name: ProductName
+}
+
 // #[derive(Serial, Deserial, SchemaType)]
 // pub struct ClaimTokenParams {
 //     pub id: TokenID,

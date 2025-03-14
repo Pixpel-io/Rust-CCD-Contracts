@@ -92,6 +92,3 @@ pub struct ExchangeView {
     pub lp_tokens_supply: TokenAmount,
     pub lp_tokens_holder_balance: TokenAmount,
 }
-
-#[derive(Serialize, SchemaType, Debug)]
-pub struct LPTokenInfo;

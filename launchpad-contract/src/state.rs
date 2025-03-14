@@ -1,8 +1,8 @@
-use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID};
+use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, Duration, HasChainMetadata,
     HasCommonData, ReceiveContext, SchemaType, Serial, Serialize, StateApi, StateBuilder, StateMap,
-    StateRef, StateRefMut, Timestamp,
+    StateMapIterMut, StateRef, StateRefMut, Timestamp,
 };
 
 use crate::{
@@ -15,6 +15,8 @@ use crate::{
 pub type LaunchPadStateMut<'a> = StateRefMut<'a, LaunchPad, StateApi>;
 /// Alias for immutable state reference of a `LaunchPad` type
 pub type LaunchPadState<'a> = StateRef<'a, LaunchPad>;
+/// Iterator over launch-pad's holders and their associated holder-info
+pub type HoldersMut<'a> = StateMapIterMut<'a, AccountAddress, HolderInfo, StateApi>;
 
 /// Number of days in a month
 pub const DAYS: u64 = 31;
@@ -316,7 +318,7 @@ impl LaunchPad {
 
     /// Updates the release data related to a specific holder in the
     /// launch pad.
-    pub fn set_holder_release_info(
+    pub fn set_holder_release_info_unlocked(
         &mut self,
         holder: AccountAddress,
         cycle: u8,
@@ -325,7 +327,25 @@ impl LaunchPad {
         let mut info = self.holders.get_mut(&holder).unwrap();
 
         info.cycles_rolled = cycle;
-        let _ = info.release_data.insert(cycle, release_data);
+        let _ = info.release_data.unlocked.insert(cycle, release_data);
+    }
+
+    /// Updates the release data related to a specific holder in the
+    /// launch pad.
+    pub fn set_holder_release_info_locked(
+        &mut self,
+        holder: AccountAddress,
+        cycle: u8,
+        claimed: bool,
+    ) {
+        let mut info = self.holders.get_mut(&holder).unwrap();
+        let mut details = info.release_data.locked.get_mut(&cycle).unwrap();
+
+        details.3 = claimed;
+    }
+
+    pub fn get_holders_mut(&mut self) -> HoldersMut<'_> {
+        self.holders.iter_mut()
     }
 }
 
@@ -422,7 +442,14 @@ pub struct HolderInfo<S = StateApi> {
     pub cycles_rolled: u8,
     /// Release data regarding each cycle claimed
     /// by the holder
-    pub release_data: StateMap<u8, (TokenAmount, Timestamp), S>,
+    pub release_data: Release<S>,
+}
+
+#[derive(Serial, DeserialWithState, Debug)]
+#[concordium(state_parameter = "S")]
+pub struct Release<S = StateApi> {
+    pub unlocked: StateMap<u8, (TokenAmount, Timestamp), S>,
+    pub locked: StateMap<u8, (TokenAmount, TokenIdU64, Timestamp, bool), S>,
 }
 
 /// Holds the Lock-up details for launch-pad such as:
@@ -496,7 +523,7 @@ impl TimePeriod {
     /// Returns `Ok()` or else `VestingError`
     pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), LaunchPadError> {
         if self.start >= self.end && self.end <= current {
-            return Err(LaunchPadError::InCorrectTimePeriod);
+            return Err(LaunchPadError::InCorrect);
         }
         Ok(())
     }
