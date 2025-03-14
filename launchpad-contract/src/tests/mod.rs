@@ -53,7 +53,13 @@ const OWNER_TOKEN_URL: &str = "http://some.example/token/0";
 ///
 /// It is required to build the auction contract in the root as `build/auction.wasm.v1` and
 /// cis2_multi build should be present in path `test-build-artifacts/cis2multi.wasm.v1`
-pub fn initialize_chain_and_launch_pad() -> (Chain, AccountKeys, ContractAddress, ContractAddress) {
+pub fn initialize_chain_and_contracts() -> (
+    Chain,
+    AccountKeys,
+    ContractAddress,
+    ContractAddress,
+    ContractAddress,
+) {
     let mut chain = Chain::builder()
         .build()
         .expect("Should be able to build chain");
@@ -81,31 +87,14 @@ pub fn initialize_chain_and_launch_pad() -> (Chain, AccountKeys, ContractAddress
     }
 
     // Load and deploy the cis2 token module.
-    let module = module_load_v1("../nft-auction/test-build-artifacts/cis2multi.wasm.v1")
-        .expect("Module exists");
-
-    let deployment = chain
-        .module_deploy_v1(SIGNER, ADMIN, module)
-        .expect("Deploy valid module");
-
-    let payload = InitContractPayload {
-        amount: Amount::zero(),
-        mod_ref: deployment.module_reference,
-        init_name: OwnedContractName::new_unchecked("init_cis2_multi".to_string()),
-        param: OwnedParameter::from_serial(&TokenAmount(10000u64)).expect("Serialize parameter"),
-    };
-
-    // Initialize the cis2 token contract.
-    let token = chain
-        .contract_init(SIGNER, ADMIN, Energy::from(10000), payload)
-        .expect("Initialize cis2 token contract");
+    let cis2_contract = initialize_contract(
+        &mut chain,
+        "../nft-auction/test-build-artifacts/cis2multi.wasm.v1",
+        "cis2_multi",
+        TokenAmount(10000u64),
+    );
 
     // Load and deploy the auction module.
-    let module = module_load_v1("build/launchpad.wasm.v1").expect("Module exists");
-    let deployment = chain
-        .module_deploy_v1(SIGNER, ADMIN, module)
-        .expect("Deploy valid module");
-
     let admin_params = Admin {
         address: ADMIN,
         registeration_fee: PLATFORM_REG_FEE,
@@ -114,37 +103,39 @@ pub fn initialize_chain_and_launch_pad() -> (Chain, AccountKeys, ContractAddress
         dex_address: ContractAddress::new(1001, 0),
     };
 
-    let payload = InitContractPayload {
-        amount: Amount::zero(),
-        mod_ref: deployment.module_reference,
-        init_name: OwnedContractName::new_unchecked("init_LaunchPad".to_string()),
-        param: OwnedParameter::from_serial(&admin_params)
-            .expect("[Error] Unable to Serialize Admin params"),
-    };
+    let launch_pad_contract = initialize_contract(
+        &mut chain,
+        "build/launchpad.wasm.v1",
+        "LaunchPad",
+        admin_params,
+    );
 
-    // Initialize the auction contract.
-    let init_launch_pad = chain
-        .contract_init(SIGNER, ADMIN, Energy::from(10000), payload)
-        .expect("Initialize launch pad");
+    let dex_contract = initialize_contract(
+        &mut chain,
+        "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
+        "pixpel_swap".into(),
+        (),
+    );
 
     (
         chain,
         keypairs_admin,
-        init_launch_pad.contract_address,
-        token.contract_address,
+        launch_pad_contract,
+        cis2_contract,
+        dex_contract,
     )
 }
 
 fn initialize_contract<P>(
     chain: &mut Chain,
-    module_path: String,
-    contract_name: String,
+    module_path: &str,
+    contract_name: &str,
     init_params: P,
 ) -> ContractAddress
 where
     P: Serial,
 {
-    let module = module_load_v1(module_path.as_str()).expect("[Error] Unable to load module");
+    let module = module_load_v1(module_path).expect("[Error] Unable to load module");
     let deploy = chain
         .module_deploy_v1(SIGNER, ADMIN, module)
         .expect("[Error] Unable to deploy");
@@ -220,7 +211,7 @@ where
         amount: Amount::zero(),
         address: contract,
         receive_name: OwnedReceiveName::new_unchecked(receive_name.to_string()),
-        message: OwnedParameter::from_serial(&params).expect("BalanceOf params"),
+        message: OwnedParameter::from_serial(&params).expect("[Error] Unable to parse params"),
     };
 
     let result = chain.contract_invoke(
@@ -233,7 +224,7 @@ where
     result
         .unwrap()
         .parse_return_value()
-        .expect("[Error] Unable to deserialize")
+        .expect("[Error] Unable to deserialize response")
 }
 
 /// The parameter for the contract function `mint` which mints/airdrops a number
@@ -254,9 +245,12 @@ impl From<(AccountAddress, TokenID, String)> for MintParams {
     fn from(value: (AccountAddress, TokenID, String)) -> Self {
         Self {
             to: Receiver::from_account(value.0),
-            metadata_url: MetadataUrl { url: value.2, hash: None },
+            metadata_url: MetadataUrl {
+                url: value.2,
+                hash: None,
+            },
             token_id: value.1,
-            data: AdditionalData::empty()
+            data: AdditionalData::empty(),
         }
     }
 }
@@ -273,29 +267,17 @@ pub fn mint_token(
     token_id: TokenID,
     url: String,
 ) {
-    let params = MintParams {
-        to: Receiver::from_account(account),
-        metadata_url: MetadataUrl { url, hash: None },
-        token_id,
-        data: AdditionalData::empty(),
-    };
+    let params = MintParams::from((account, token_id, url));
 
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: cis2_contract,
-        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.mint".to_string()),
-        message: OwnedParameter::from_serial(&params).expect("[Error] Serialization Failed"),
-    };
-
-    let _ = chain
-        .contract_update(
-            SIGNER,
-            account,
-            Address::Account(account),
-            Energy::from(10000),
-            payload,
-        )
-        .expect("[Error] Mint Failed");
+    update_contract::<_, ()>(
+        chain,
+        cis2_contract,
+        account,
+        params,
+        None,
+        "cis2_multi.mint",
+    )
+    .expect("[Error] Mint Failed");
 }
 
 /// A helper function which invokes `cis2_multi` contract to get the balance of specific tokens minted
@@ -405,14 +387,14 @@ fn ensure_is_operator_of(
 /// operator of an owner in ci2_contract
 ///
 /// This is useful for integration testing
-fn deposit_tokens_to_launch_pad(
+fn deposit_tokens(
     chain: &mut Chain,
     invoker: AccountAddress,
     product_name: String,
     cis2_contract: ContractAddress,
     launch_pad_contract: ContractAddress,
-) {
-    let transfer_params = TransferParams::<TokenID, TokenAmount>(vec![Transfer {
+) -> Result<(), LaunchPadError> {
+    let transfer_params = TransferParams(vec![Transfer {
         token_id: OWNER_TOKEN_ID,
         amount: TokenAmount(10000),
         from: Address::Account(OWNER),
@@ -423,256 +405,71 @@ fn deposit_tokens_to_launch_pad(
         data: AdditionalData::from(product_name.as_bytes().to_owned()),
     }]);
 
-    let payload = UpdateContractPayload {
-        amount: Amount::zero(),
-        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.transfer".to_string()),
-        address: cis2_contract,
-        message: OwnedParameter::from_serial(&transfer_params)
-            .expect("[Error] Unable to serialize UpdateOperator params"),
-    };
-
-    chain
-        .contract_update(
-            SIGNER,
-            invoker,
-            Address::Account(invoker),
-            Energy::from(10000),
-            payload,
-        )
-        .expect("[Error] Deposit Failed");
+    update_contract::<_, ()>(
+        chain,
+        cis2_contract,
+        invoker,
+        transfer_params,
+        None,
+        "cis2_multi.transfer",
+    )
 }
 
-// /// A helper function to invoke `viewItemState` in auction to get a specefic
-// /// item's current state in the auction contract
-// ///
-// /// Returns the `ItemState` type or panics with error message
-// fn get_item_state(
-//     chain: &Chain,
-//     contract: ContractAddress,
-//     account: AccountAddress,
-//     item_index: u16,
-// ) -> ItemState {
-//     let view_item_params = item_index;
-
-//     let payload = UpdateContractPayload {
-//         amount: Amount::from_ccd(0),
-//         address: contract,
-//         receive_name: OwnedReceiveName::new_unchecked("cis2-auction.viewItemState".to_string()),
-//         message: OwnedParameter::from_serial(&view_item_params)
-//             .expect("[Error] Unable to serialize view item params"),
-//     };
-
-//     let item: ItemState = chain
-//         .contract_invoke(
-//             account,
-//             Address::Account(account),
-//             Energy::from(10000),
-//             payload,
-//         )
-//         .expect("[Error] Invocation failed while invoking 'addItem' ")
-//         .parse_return_value()
-//         .expect("[Error] Unable to deserialize ItemState");
-
-//     item
-// }
+fn approve_launch_pad(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    params: ApprovalParams,
+    contract: ContractAddress,
+) -> Result<(), LaunchPadError> {
+    update_contract(
+        chain,
+        contract,
+        invoker,
+        params,
+        None,
+        "LaunchPad.ApproveLaunchPad",
+    )
+}
 
 /// A helper function to invoke `viewItemState` in auction to get a specefic
 /// item's current state in the auction contract
 ///
 /// Returns the `ItemState` type or panics with error message
-fn view_state(chain: &Chain, contract: ContractAddress, account: AccountAddress) -> StateView {
-    let payload = UpdateContractPayload {
-        amount: Amount::from_ccd(0),
-        address: contract,
-        receive_name: OwnedReceiveName::new_unchecked("LaunchPad.viewState".to_string()),
-        message: OwnedParameter::empty(),
-    };
-
-    let item: StateView = chain
-        .contract_invoke(
-            account,
-            Address::Account(account),
-            Energy::from(10000),
-            payload,
-        )
-        .expect("[Error] Invocation failed while invoking 'addItem' ")
-        .parse_return_value()
-        .expect("[Error] Unable to deserialize ItemState");
-
-    item
+fn view_launch_pad(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    product_name: String,
+    contract: ContractAddress,
+) -> LaunchPadView {
+    read_contract(
+        chain,
+        contract,
+        invoker,
+        product_name,
+        "LaunchPad.viewLaunchPad",
+    )
 }
 
-// /// A helper function to invoke `bid` function in auction contract to bid on an
-// /// item listed for auction
-// ///
-// /// Returns the `Ok()` if the invocation succeeds or else `auction::Error`
-// fn bid_on_item(
-//     chain: &mut Chain,
-//     contract: ContractAddress,
-//     invoker: AccountAddress,
-//     sender: Address,
-//     amount: Amount,
-//     bid_params: BidParams,
-// ) -> Result<(), Error> {
-//     let payload = UpdateContractPayload {
-//         amount,
-//         address: contract,
-//         receive_name: OwnedReceiveName::new_unchecked("cis2-auction.bid".to_string()),
-//         message: OwnedParameter::from_serial(&bid_params)
-//             .expect("[Error] Unable to serialize bid_params"),
-//     };
-
-//     // BOB bids on the item added by ALICE
-//     let invoke_result =
-//         chain.contract_update(SIGNER, invoker, sender, Energy::from(10000), payload);
-
-//     match invoke_result {
-//         Ok(_) => Ok(()),
-//         Err(err) => Err(err.into()),
-//     }
-// }
+fn view_state(chain: &mut Chain, invoker: AccountAddress, contract: ContractAddress) -> StateView {
+    read_contract(chain, contract, invoker, "", "LaunchPad.viewState")
+}
 
 /// A helper function to invoke `CreatLaunchPad` function in launch pad contract to list an
 /// product for ICO presale
 ///
 /// Returns the `Ok()` if the invocation succeeds or else `LaunchPadError::Error`
-fn add_launch_pad(
+fn create_launch_pad(
     chain: &mut Chain,
     contract: ContractAddress,
     invoker: AccountAddress,
     add_params: CreateParams,
 ) -> Result<(), LaunchPadError> {
-    let payload = UpdateContractPayload {
-        amount: PLATFORM_REG_FEE,
-        address: contract,
-        receive_name: OwnedReceiveName::new_unchecked("LaunchPad.CreateLaunchPad".to_string()),
-        message: OwnedParameter::from_serial(&add_params)
-            .expect("[Error] Unable to serialize bid_params"),
-    };
-
-    // Adds the product for presale as launch pad
-    let invoke_result = chain.contract_update(
-        SIGNER,
+    update_contract(
+        chain,
+        contract,
         invoker,
-        Address::Account(invoker),
-        Energy::from(10000),
-        payload,
-    );
-
-    match invoke_result {
-        Ok(_) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+        add_params,
+        Some(PLATFORM_REG_FEE),
+        "LaunchPad.CreateLaunchPad",
+    )
 }
-
-/// A helper function to invoke `CreatLaunchPad` function in launch pad contract to list an
-/// product for ICO presale
-///
-/// Returns the `Ok()` if the invocation succeeds or else `LaunchPadError::Error`
-fn approve_launch_pad(
-    chain: &mut Chain,
-    contract: ContractAddress,
-    invoker: AccountAddress,
-    approval_params: ApprovalParams,
-) -> Result<(), LaunchPadError> {
-    let payload = UpdateContractPayload {
-        amount: Amount::zero(),
-        address: contract,
-        receive_name: OwnedReceiveName::new_unchecked("LaunchPad.ApproveLaunchPad".to_string()),
-        message: OwnedParameter::from_serial(&approval_params)
-            .expect("[Error] Unable to serialize bid_params"),
-    };
-
-    // Adds the product for presale as launch pad
-    let invoke_result = chain.contract_update(
-        SIGNER,
-        invoker,
-        Address::Account(invoker),
-        Energy::from(10000),
-        payload,
-    );
-
-    match invoke_result {
-        Ok(_) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
-}
-
-/// A helper function to invoke `CreatLaunchPad` function in launch pad contract to list an
-/// product for ICO presale
-///
-/// Returns the `Ok()` if the invocation succeeds or else `LaunchPadError::Error`
-fn get_launch_pad(
-    chain: &mut Chain,
-    contract: ContractAddress,
-    invoker: AccountAddress,
-    product_name: String,
-) -> LaunchPadView {
-    let payload = UpdateContractPayload {
-        amount: Amount::zero(),
-        address: contract,
-        receive_name: OwnedReceiveName::new_unchecked("LaunchPad.viewLaunchPad".to_string()),
-        message: OwnedParameter::from_serial::<String>(&product_name)
-            .expect("[Error] Serialization"),
-    };
-
-    // Adds the product for presale as launch pad
-    let invoke_result = chain.contract_invoke(
-        invoker,
-        Address::Account(invoker),
-        Energy::from(10000),
-        payload,
-    );
-
-    match invoke_result {
-        Ok(success) => success.parse_return_value().unwrap(),
-        Err(err) => panic!("[Error::get_launch_pad] {:?}", LaunchPadError::from(err)),
-    }
-}
-// /// A helper function to invoke `finalize` function in auction contract for item finalization
-// /// listed in active auctions
-// ///
-// /// Returns the `Ok()` if the invocation succeeds or else `auction::Error`
-// fn finalize_auction(
-//     chain: &mut Chain,
-//     contract: ContractAddress,
-//     invoker: AccountAddress,
-//     sender: Address,
-//     item_index: u16,
-// ) -> Result<(), Error> {
-//     let item_index_params = item_index;
-
-//     let payload = UpdateContractPayload {
-//         amount: Amount::zero(),
-//         address: contract,
-//         receive_name: OwnedReceiveName::new_unchecked("cis2-auction.finalize".to_string()),
-//         message: OwnedParameter::from_serial(&item_index_params)
-//             .expect("[Error] Unable to serialize bid_params"),
-//     };
-
-//     // BOB bids on the item added by ALICE
-//     let invoke_result =
-//         chain.contract_update(SIGNER, invoker, sender, Energy::from(10000), payload);
-
-//     match invoke_result {
-//         Ok(_) => Ok(()),
-//         Err(err) => Err(err.into()),
-//     }
-// }
-
-// /// Mapping `ContractInvokeError` to `auction::error::Error`
-// ///
-// /// It parse any invocation error captured while integration testing to contract error
-// impl From<ContractInvokeError> for Error {
-//     fn from(value: ContractInvokeError) -> Self {
-//         if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
-//             if let InvokeFailure::ContractReject { code: _, data } = failure_kind {
-//                 data[0].into()
-//             } else {
-//                 panic!("[Error] Unable to map received invocation error code")
-//             }
-//         } else {
-//             panic!("[Error] Unable to map ContractInvokeError other than ExecutionError")
-//         }
-//     }
-// }

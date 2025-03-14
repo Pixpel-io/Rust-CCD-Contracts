@@ -840,9 +840,9 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
                     .get_mut_launchpad(claim_params.product_name)?
                     .set_holder_release_info_locked(sender, cycle, true);
 
-                return Ok(())
+                return Ok(());
             }
-            
+
             bail!(LaunchPadError::InCorrect)
         }
     }

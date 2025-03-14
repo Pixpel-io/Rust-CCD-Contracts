@@ -1,48 +1,35 @@
-use core::marker::PhantomData;
-
 use crate::{
     errors::LaunchPadError,
-    params::{ApprovalParams, CreateParams, GetExchangeParams, LockupDetails, TokenInfo},
-    response::{ExchangeView, LaunchPadView},
-    state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
-    tests::{
-        get_token_balance, initialize_chain_and_launch_pad, initialize_contract, view_state,
-        MintParams, PLATFORM_REG_FEE,
+    params::{
+        AddLiquidityParams, ApprovalParams, CreateParams, GetExchangeParams, LockupDetails,
+        TokenInfo,
     },
+    response::ExchangeView,
+    state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
 };
 use concordium_cis2::{
-    AdditionalData, OperatorUpdate, Receiver, TokenAmountU64 as TokenAmount, TokenIdU8, TokenIdVec,
-    Transfer, TransferParams, UpdateOperator, UpdateOperatorParams,
-};
-use concordium_smart_contract_testing::UpdateContractPayload;
-use concordium_std::{
-    Address, Amount, ContractAddress, Deserial, OwnedEntrypointName, OwnedParameter,
-    OwnedReceiveName, SchemaType, Serial, Timestamp,
+    OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdVec, UpdateOperator, UpdateOperatorParams,
 };
 
+use concordium_std::{Address, Amount, Timestamp};
+
 use super::{
-    mint_token, read_contract, update_contract, ADMIN, OWNER, OWNER_TOKEN_ID, OWNER_TOKEN_URL,
+    approve_launch_pad, create_launch_pad, deposit_tokens, initialize_chain_and_contracts,
+    mint_token, read_contract, update_contract, view_launch_pad, ADMIN, OWNER,
+    OWNER_TOKEN_ID, OWNER_TOKEN_URL,
 };
 
 #[test]
 fn launch_pad_smoke() -> Result<(), LaunchPadError> {
-    let (mut chain, _, lp_contract, cis2_contract) = initialize_chain_and_launch_pad();
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
 
-    let dex_contract = initialize_contract(
+    mint_token(
         &mut chain,
-        "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
-        "pixpel_swap".into(),
-        (),
-    );
-
-    update_contract::<MintParams, ()>(
-        &mut chain,
-        cis2_contract,
         OWNER,
-        (OWNER, OWNER_TOKEN_ID, OWNER_TOKEN_URL.to_string()).into(),
-        None,
-        "cis2_multi.mint",
-    )?;
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
 
     static PRODUCT_NAME: &str = "Pixpel Market-Place";
 
@@ -75,79 +62,36 @@ fn launch_pad_smoke() -> Result<(), LaunchPadError> {
         },
     };
 
-    update_contract::<_, ()>(
-        &mut chain,
-        lp_contract,
-        OWNER,
-        add_params,
-        Some(PLATFORM_REG_FEE),
-        "LaunchPad.CreateLaunchPad",
-    )?;
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
 
-    update_contract::<_, ()>(
+    approve_launch_pad(
         &mut chain,
-        lp_contract,
         ADMIN,
         ApprovalParams {
             product_name: PRODUCT_NAME.to_string(),
             approve: true,
         },
-        None,
-        "LaunchPad.ApproveLaunchPad",
-    )?;
-
-    update_contract::<_, ()>(
-        &mut chain,
-        cis2_contract,
-        OWNER,
-        TransferParams::<TokenIdU8, TokenAmount>(vec![Transfer {
-            token_id: OWNER_TOKEN_ID,
-            amount: TokenAmount(10000),
-            from: Address::Account(OWNER),
-            to: Receiver::Contract(
-                lp_contract,
-                OwnedEntrypointName::new_unchecked("Deposit".to_string()),
-            ),
-            data: AdditionalData::from(PRODUCT_NAME.as_bytes().to_owned()),
-        }]),
-        None,
-        "cis2_multi.transfer",
-    )?;
-
-    let response = read_contract::<_, LaunchPadView>(
-        &mut chain,
         lp_contract,
+    )?;
+
+    deposit_tokens(
+        &mut chain,
         OWNER,
         PRODUCT_NAME.to_string(),
-        "LaunchPad.viewLaunchPad",
-    );
+        cis2_contract,
+        lp_contract,
+    )?;
 
-    println!("{:#?}", response);
+    let response = view_launch_pad(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract);
+
+    println!("{:?}", response);
 
     Ok(())
 }
 
 #[test]
-fn error_codes() {
-    ((-43)..=(-1)).for_each(|code| println!("Error::{:?}", LaunchPadError::from(code)));
-}
-
-#[derive(Serial, Deserial, SchemaType)]
-struct AddLiquidityParams {
-    pub token: TokenInfo,
-    pub token_amount: TokenAmount,
-}
-
-#[test]
 fn dex_liquid_smoke() -> Result<(), LaunchPadError> {
-    let (mut chain, _, launch_pad_addr, cis2_addr) = initialize_chain_and_launch_pad();
-
-    let dex_contract = initialize_contract(
-        &mut chain,
-        "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
-        "pixpel_swap".into(),
-        (),
-    );
+    let (mut chain, _, _, cis2_addr, dex_contract) = initialize_chain_and_contracts();
 
     mint_token(
         &mut chain,
