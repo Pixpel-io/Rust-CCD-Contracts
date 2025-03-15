@@ -669,9 +669,12 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
                 / 100,
         );
 
+        // Tokens from the ICO of product will also be locked in liquidity
+        // and the amount of tokens will be designated reflected by the base
+        // price of the token in ccd and the amount of CCD being locked.
         let token_lp_alloc = launch_pad.product_base_price().micro_ccd / ccd_lp_alloc.micro_ccd;
 
-        // Remaining amount in CCD that can be withdrawn after the
+        // Remaining amount in CCD that can be withdrawn after the liquidity
         // allocation
         let withdrawable = launch_pad.collected - ccd_lp_alloc;
 
@@ -686,6 +689,8 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // to lock the funds before trasfering the funds to the owner
         //
         // And pay the the LPTokens bought from the DEX to admin
+
+        // Making DEX as an operator of Launch pad in CIS2 contract
         let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
             cis2_contract,
         )
@@ -700,6 +705,8 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             }
         }
 
+        // Adding the liquidity to the Platform's DEX and invoking
+        // DEX to get the assigned LPTokens against the liquidity.
         host.invoke_contract(
             &dex_contract,
             &AddLiquidityParams {
@@ -730,12 +737,25 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             .unwrap()
             .get()?;
 
+        // Platform will charge a certain amount from allocated liquidity
+        // in exchange of DEX services it provides to the product.
+        // Amount that is charged will be according to the launch pad policies
+        // and it will be charge from the received LPTokens.
         let platform_lp_share =
             (exchange.lp_tokens_supply * host.state().admin_liquidity_share()).0 / 100;
 
+        // Calculating the remaining LPTokens after platform's cut from the 
+        // received LPTokens.
+        // Allocated LPTokens are divided in half because, equally half of the
+        // LPTokens dividend belongs to the product owner and the other half
+        // is distributed among the holders in accordance with their percentage
+        // contribution in the product's launch pad. 
+        // This is all aligned with the platform's policies to prevent rug-pull
+        // as much as possible.
         let lp_allocated: TokenAmount =
             ((exchange.lp_tokens_supply - platform_lp_share.into()).0 / 2).into();
 
+        // Transfering the DEX service charges to the platform as the LPTokens. 
         host.invoke_contract(
             &dex_contract,
             &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
@@ -749,7 +769,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             Amount::zero(),
         )?;
 
-        // Transfering the withdrawable amount to the owner
+        // Transfering the withdrawable amount to the owner in CCD
         host.invoke_transfer(&owner, withdrawable)?;
         // Set the withdrawn flag in launchpad state
         host.state_mut()
@@ -757,6 +777,11 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             .unwrap()
             .withdrawn = true;
 
+        // Updating each holder's information regarding the locked release
+        // cycles. LPTokens will be linearly released over the number of 
+        // months provided by the product owner. 
+        // Amount of LPTokens, being released in each cycle for any holder,
+        // solely depends on its percentage contribution to the ICO.
         for (_, mut holder_info) in host
             .state_mut()
             .get_mut_launchpad(product_name.clone())
@@ -787,6 +812,12 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
 
         let mut launch_pad = host.state_mut().get_mut_launchpad(product_name).unwrap();
 
+        // Pre-computing the release cycle information for the product owner
+        // locked funds release (LPTokens). For product owner, locked funds
+        // are released over a year from now in 3 cycles which are equally 
+        // separated by 4 months interval.
+        // This is all aligned with the platform's policies to prevent rug-pull
+        // as much as possible.
         for i in 0..3 {
             let cycle_count = i + 1;
             let lp_amount: TokenAmount = (lp_allocated.0 / 3).into();

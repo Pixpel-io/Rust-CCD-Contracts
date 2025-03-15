@@ -340,20 +340,27 @@ impl LaunchPad {
         cycle: u8,
         claimed: bool,
     ) {
-        let mut info = self.holders.get_mut(&holder).unwrap();
-        let mut details = info.release_data.locked.get_mut(&cycle).unwrap();
-
-        details.3 = claimed;
+        self.holders
+            .get_mut(&holder)
+            .unwrap()
+            .release_data
+            .locked
+            .get_mut(&cycle)
+            .unwrap()
+            .3 = claimed;
     }
 
+    
+    /// Sets the locked releasse info related to the product owner of the
+    /// launch pad.
+    pub fn set_locked_release_info(&mut self, cycle: u8, claimed: bool) {
+        self.locked_release.get_mut(&cycle).unwrap().3 = claimed;
+    }
+
+    /// Returns an mutable iteratoor over the list of holders contributing
+    /// to the Launch pad.
     pub fn get_holders_mut(&mut self) -> HoldersMut<'_> {
         self.holders.iter_mut()
-    }
-
-    pub fn set_locked_release_info(&mut self, cycle: u8, claimed: bool) {
-        let mut details = self.locked_release.get_mut(&cycle).unwrap();
-
-        details.3 = claimed;
     }
 }
 
@@ -456,7 +463,11 @@ pub struct HolderInfo<S = StateApi> {
 #[derive(Serial, DeserialWithState, Debug)]
 #[concordium(state_parameter = "S")]
 pub struct Release<S = StateApi> {
+    /// Unlocked release information regarding each cycle of
+    /// release.
     pub unlocked: StateMap<u8, (TokenAmount, Timestamp), S>,
+    /// Locked (LPTokens) release information regarding each cycle of
+    /// release.
     pub locked: StateMap<u8, (TokenAmount, TokenIdU64, Timestamp, bool), S>,
 }
 
