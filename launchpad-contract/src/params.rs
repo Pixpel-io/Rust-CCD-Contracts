@@ -114,7 +114,7 @@ pub struct GetExchangeParams {
 
 #[derive(Serial, Deserial, SchemaType)]
 pub enum Claimer {
-    OWNER,
+    OWNER(u8),
     HOLDER(u8)
 }
 

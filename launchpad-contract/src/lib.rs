@@ -733,7 +733,8 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         let platform_lp_share =
             (exchange.lp_tokens_supply * host.state().admin_liquidity_share()).0 / 100;
 
-        let lp_allocated = exchange.lp_tokens_supply - platform_lp_share.into();
+        let lp_allocated: TokenAmount =
+            ((exchange.lp_tokens_supply - platform_lp_share.into()).0 / 2).into();
 
         host.invoke_contract(
             &dex_contract,
@@ -758,7 +759,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
 
         for (_, mut holder_info) in host
             .state_mut()
-            .get_mut_launchpad(product_name)
+            .get_mut_launchpad(product_name.clone())
             .unwrap()
             .get_holders_mut()
         {
@@ -766,19 +767,40 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
                 (holder_info.invested.micro_ccd / raised_funds_ccd.micro_ccd) * 100;
             let holder_lp_share = (lp_allocated * holder_contribution).0 / 100;
 
-            for cycle_count in 0..liquidity_details.release_cycles {
-                let lp_amount = holder_lp_share / liquidity_details.release_cycles;
+            for i in 0..liquidity_details.release_cycles {
+                let lp_amount: TokenAmount =
+                    (holder_lp_share / liquidity_details.release_cycles).into();
+                let cycle_count = i + 1;
 
                 let _ = holder_info.release_data.locked.insert(
-                    (cycle_count + 1) as u8,
+                    cycle_count as u8,
                     (
-                        lp_amount.into(),
+                        lp_amount,
                         exchange.lp_token_id,
-                        Timestamp::now(),
+                        ((ctx.metadata().block_time().millis + CYCLE_DURATION) * cycle_count)
+                            .into(),
                         false,
                     ),
                 );
             }
+        }
+
+        let mut launch_pad = host.state_mut().get_mut_launchpad(product_name).unwrap();
+
+        for i in 0..3 {
+            let cycle_count = i + 1;
+            let lp_amount: TokenAmount = (lp_allocated.0 / 3).into();
+
+            let _ = launch_pad.locked_release.insert(
+                cycle_count as u8,
+                (
+                    lp_amount,
+                    exchange.lp_token_id,
+                    ((ctx.metadata().block_time().millis + CYCLE_DURATION * 4) * cycle_count)
+                        .into(),
+                    false,
+                ),
+            );
         }
 
         return Ok(());
@@ -802,9 +824,34 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
 
     let claim_params: ClaimLockedParams = ctx.parameter_cursor().get()?;
 
-    match claim_params.claimer {
-        Claimer::OWNER => {
-            unimplemented!("Need to clear about the owner locked funds claim policy")
+    let (tokend_id, token_amount) = match claim_params.claimer {
+        Claimer::OWNER(cycle) => {
+            let launch_pad = host
+                .state()
+                .get_launchpad(claim_params.product_name.clone())?;
+
+            ensure!(
+                sender == launch_pad.get_product_owner(),
+                LaunchPadError::UnAuthorized
+            );
+
+            if let Some(cycle_details) = launch_pad.locked_release.get(&cycle) {
+                let (token_amount, lp_token_id, timestamp, claimed) = *cycle_details;
+
+                ensure!(claimed, LaunchPadError::Claimed);
+                ensure!(
+                    ctx.metadata().block_time() >= timestamp,
+                    LaunchPadError::NotElapsed
+                );
+
+                host.state_mut()
+                    .get_mut_launchpad(claim_params.product_name)?
+                    .set_locked_release_info(cycle, true);
+
+                (lp_token_id, token_amount)
+            } else {
+                return Err(LaunchPadError::InCorrect);
+            }
         }
         Claimer::HOLDER(cycle) => {
             if let Some(locked_cycle_details) = host
@@ -823,29 +870,31 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
                     LaunchPadError::NotElapsed
                 );
 
-                host.invoke_contract(
-                    &host.state().dex_address(),
-                    &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
-                        token_id: lp_token_id,
-                        amount: token_amount,
-                        from: ctx.self_address().into(),
-                        to: concordium_cis2::Receiver::Account(sender),
-                        data: AdditionalData::empty(),
-                    }]),
-                    EntrypointName::new_unchecked("transfer"),
-                    Amount::zero(),
-                )?;
-
                 host.state_mut()
                     .get_mut_launchpad(claim_params.product_name)?
-                    .set_holder_release_info_locked(sender, cycle, true);
+                    .set_holder_locked_release_info(sender, cycle, true);
 
-                return Ok(());
+                (lp_token_id, token_amount)
+            } else {
+                return Err(LaunchPadError::InCorrect);
             }
-
-            bail!(LaunchPadError::InCorrect)
         }
-    }
+    };
+
+    host.invoke_contract(
+        &host.state().dex_address(),
+        &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+            token_id: tokend_id,
+            amount: token_amount,
+            from: ctx.self_address().into(),
+            to: concordium_cis2::Receiver::Account(sender),
+            data: AdditionalData::empty(),
+        }]),
+        EntrypointName::new_unchecked("transfer"),
+        Amount::zero(),
+    )?;
+
+    Ok(())
 }
 
 #[receive(

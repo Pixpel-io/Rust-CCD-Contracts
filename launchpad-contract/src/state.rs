@@ -132,6 +132,7 @@ pub struct LaunchPad<S = StateApi> {
     /// Amount that have been collected sicne the start
     /// of presale
     pub collected: Amount,
+    pub locked_release: StateMap<u8, (TokenAmount, TokenIdU64, Timestamp, bool), S>,
     /// List of investors with their associated invested
     /// amount in CCD
     pub holders: StateMap<AccountAddress, HolderInfo, S>,
@@ -177,6 +178,7 @@ impl LaunchPad {
                 status: LaunchPadStatus::INREVIEW,
                 pause: PauseDetails::default(),
                 collected: Amount::zero(),
+                locked_release: state_builder.new_map(),
                 lock_up: Lockup {
                     cliff,
                     release_cycles: params.lockup_details.release_cycles,
@@ -316,7 +318,7 @@ impl LaunchPad {
         Err(LaunchPadError::WrongHolder)
     }
 
-    /// Updates the release data related to a specific holder in the
+    /// Updates the unlocked release data related to a specific holder in the
     /// launch pad.
     pub fn set_holder_release_info_unlocked(
         &mut self,
@@ -330,9 +332,9 @@ impl LaunchPad {
         let _ = info.release_data.unlocked.insert(cycle, release_data);
     }
 
-    /// Updates the release data related to a specific holder in the
+    /// Updates the locked release info related to a specific holder in the
     /// launch pad.
-    pub fn set_holder_release_info_locked(
+    pub fn set_holder_locked_release_info(
         &mut self,
         holder: AccountAddress,
         cycle: u8,
@@ -346,6 +348,12 @@ impl LaunchPad {
 
     pub fn get_holders_mut(&mut self) -> HoldersMut<'_> {
         self.holders.iter_mut()
+    }
+
+    pub fn set_locked_release_info(&mut self, cycle: u8, claimed: bool) {
+        let mut details = self.locked_release.get_mut(&cycle).unwrap();
+
+        details.3 = claimed;
     }
 }
 
@@ -534,16 +542,6 @@ impl TimePeriod {
     /// Returns millis as `u64`
     pub fn duration_as_millis(&self) -> u64 {
         self.end.millis - self.start.millis
-    }
-
-    /// Returns the starting interval of a time period as `TimeStamp`
-    pub fn start(&self) -> Timestamp {
-        self.start
-    }
-
-    /// Returns the ending interval of a time period as `TimeStamp`
-    pub fn end(&self) -> Timestamp {
-        self.end
     }
 
     pub fn is_elapsed(&self, current: Timestamp) -> bool {

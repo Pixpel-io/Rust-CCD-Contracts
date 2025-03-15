@@ -94,22 +94,21 @@ pub fn initialize_chain_and_contracts() -> (
         TokenAmount(10000u64),
     );
 
-    // Load and deploy the auction module.
-    let admin_params = Admin {
-        address: ADMIN,
-        registeration_fee: PLATFORM_REG_FEE,
-        liquidity_share: LIQUID_SHARE,
-        allocation_share: ALLOC_SHARE,
-        dex_address: ContractAddress::new(1001, 0),
-    };
-
+    // Load and deploy the main Launch Pad module.
     let launch_pad_contract = initialize_contract(
         &mut chain,
         "build/launchpad.wasm.v1",
         "LaunchPad",
-        admin_params,
+        Admin {
+            address: ADMIN,
+            registeration_fee: PLATFORM_REG_FEE,
+            liquidity_share: LIQUID_SHARE,
+            allocation_share: ALLOC_SHARE,
+            dex_address: ContractAddress::new(1001, 0),
+        },
     );
 
+    // Load and deploy the DEX (Pixpel swap) module.
     let dex_contract = initialize_contract(
         &mut chain,
         "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
