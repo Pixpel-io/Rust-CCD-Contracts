@@ -1,6 +1,6 @@
 use crate::{
     errors::LaunchPadError,
-    params::{ApprovalParams, CreateParams},
+    params::{ApprovalParams, CreateParams, VestParams},
     response::{LaunchPadView, StateView},
     state::Admin,
 };
@@ -382,6 +382,22 @@ fn ensure_is_operator_of(
     response.0[0]
 }
 
+fn invest(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    params: VestParams,
+    amount: Amount,
+    contract: ContractAddress
+) -> Result<(), LaunchPadError> {
+    update_contract(
+        chain,
+        contract,
+        invoker,
+        params,
+        Some(amount),
+        "LaunchPad.Vest",
+    )
+}
 /// A helper function which invokes `cis2_multi` to check if an account or contract is
 /// operator of an owner in ci2_contract
 ///
@@ -450,7 +466,7 @@ fn view_launch_pad(
 }
 
 fn view_state(chain: &mut Chain, invoker: AccountAddress, contract: ContractAddress) -> StateView {
-    read_contract(chain, contract, invoker, "", "LaunchPad.viewState")
+    read_contract(chain, contract, invoker, (), "LaunchPad.viewState")
 }
 
 /// A helper function to invoke `CreatLaunchPad` function in launch pad contract to list an

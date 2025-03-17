@@ -124,6 +124,12 @@ pub struct ClaimLockedParams {
     pub product_name: ProductName
 }
 
+#[derive(Serial, Deserial, SchemaType)]
+pub struct ClaimUnLockedParams {
+    pub cycle: u8,
+    pub product_name: ProductName
+}
+
 // #[derive(Serial, Deserial, SchemaType)]
 // pub struct ClaimTokenParams {
 //     pub id: TokenID,

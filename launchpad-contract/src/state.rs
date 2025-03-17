@@ -1,3 +1,5 @@
+use core::time;
+
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, Duration, HasChainMetadata,
@@ -151,6 +153,8 @@ pub struct LaunchPad<S = StateApi> {
     /// Keeps track if the raised funds are already
     /// withdrawn
     pub withdrawn: bool,
+    pub available_tokens: TokenAmount,
+    pub sold_tokens: TokenAmount,
 }
 
 impl LaunchPad {
@@ -169,6 +173,8 @@ impl LaunchPad {
         (
             params.product.name.clone(),
             Self {
+                available_tokens: params.product.allocated_tokens,
+                sold_tokens: 0.into(),
                 product: params.product,
                 timeperiod: params.timeperiod,
                 soft_cap: params.soft_cap,
@@ -250,7 +256,7 @@ impl LaunchPad {
     ///
     /// Returns `true` if any of the above statement is true
     pub fn is_finished(&self, ctx: &ReceiveContext) -> bool {
-        self.timeperiod.end > ctx.metadata().block_time()
+        self.timeperiod.end < ctx.metadata().block_time()
     }
 
     /// Checks if the pause duration has elapsed
@@ -315,21 +321,25 @@ impl LaunchPad {
             return Ok(info);
         }
 
-        Err(LaunchPadError::WrongHolder)
+        Err(LaunchPadError::NotFound)
     }
 
     /// Updates the unlocked release data related to a specific holder in the
     /// launch pad.
-    pub fn set_holder_release_info_unlocked(
+    pub fn set_holder_unlocked_release_info(
         &mut self,
         holder: AccountAddress,
         cycle: u8,
-        release_data: (TokenAmount, Timestamp),
+        claimed: bool,
     ) {
-        let mut info = self.holders.get_mut(&holder).unwrap();
-
-        info.cycles_rolled = cycle;
-        let _ = info.release_data.unlocked.insert(cycle, release_data);
+        self.holders
+            .get_mut(&holder)
+            .unwrap()
+            .release_data
+            .unlocked
+            .get_mut(&cycle)
+            .unwrap()
+            .2 = claimed;
     }
 
     /// Updates the locked release info related to a specific holder in the
@@ -350,7 +360,6 @@ impl LaunchPad {
             .3 = claimed;
     }
 
-    
     /// Sets the locked releasse info related to the product owner of the
     /// launch pad.
     pub fn set_locked_release_info(&mut self, cycle: u8, claimed: bool) {
@@ -369,8 +378,10 @@ impl LaunchPad {
 #[derive(Serialize, SchemaType, Clone, Debug)]
 pub struct VestingLimits {
     /// Minimum amount in CCD acceptable for investment
+    // #[derivative(Debug(format_with = "crate::response::debug_tokens_amount"))]
     pub min: TokenAmount,
     /// Maximum amount in CCD acceptable for investment
+    // #[derivative(Debug(format_with = "crate::response::debug_tokens_amount"))]
     pub max: TokenAmount,
 }
 
@@ -460,12 +471,39 @@ pub struct HolderInfo<S = StateApi> {
     pub release_data: Release<S>,
 }
 
+impl HolderInfo {
+    pub fn insert_locked_cycle(
+        &mut self,
+        cycle: u8,
+        token_amount: TokenAmount,
+        token_id: TokenIdU64,
+        timestamp: Timestamp,
+    ) {
+        let _ = self
+            .release_data
+            .locked
+            .insert(cycle, (token_amount, token_id, timestamp, false));
+    }
+
+    pub fn insert_unlocked_cycle(
+        &mut self,
+        cycle: u8,
+        token_amount: TokenAmount,
+        timestamp: Timestamp,
+    ) {
+        let _ = self
+            .release_data
+            .unlocked
+            .insert(cycle, (token_amount, timestamp, false));
+    }
+}
+
 #[derive(Serial, DeserialWithState, Debug)]
 #[concordium(state_parameter = "S")]
 pub struct Release<S = StateApi> {
     /// Unlocked release information regarding each cycle of
     /// release.
-    pub unlocked: StateMap<u8, (TokenAmount, Timestamp), S>,
+    pub unlocked: StateMap<u8, (TokenAmount, Timestamp, bool), S>,
     /// Locked (LPTokens) release information regarding each cycle of
     /// release.
     pub locked: StateMap<u8, (TokenAmount, TokenIdU64, Timestamp, bool), S>,
@@ -482,6 +520,7 @@ pub struct Release<S = StateApi> {
 pub struct Lockup {
     /// Cliff duration of the launchpad based on
     /// number of months
+    // #[derivative(Debug(format_with = "crate::response::debug_timestamp"))]
     pub cliff: Timestamp,
     /// Number of cycles in which the vesting will be
     /// released, these cycles are based on number of months
@@ -530,8 +569,10 @@ impl Default for PauseDetails {
 #[derive(Serialize, SchemaType, Clone, Copy, Debug)]
 pub struct TimePeriod {
     /// Starting time of a launch-pad
+    // #[derivative(Debug(format_with = "crate::response::debug_timestamp"))]
     pub start: Timestamp,
     /// Ending time of a launch-pad
+    // #[derivative(Debug(format_with = "crate::response::debug_timestamp"))]
     pub end: Timestamp,
 }
 

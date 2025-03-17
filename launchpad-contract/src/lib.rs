@@ -14,8 +14,8 @@ use concordium_std::{
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
 use params::{
-    AddLiquidityParams, ApprovalParams, ClaimLockedParams, Claimer, CreateParams,
-    GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
+    AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer,
+    CreateParams, GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
 };
 use response::{AllLaunchPads, ExchangeView, LaunchPadView, LaunchPadsView, StateView};
 use state::{HolderInfo, LaunchPad, LaunchPadStatus, LiquidityDetails, Release, State, TimePeriod};
@@ -396,8 +396,8 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     // Make sure that the launch pad is not paused, is not canceled
     // or is not finished, either due to vesting duration elapsed or
     // due to hard cap limit reached
-    ensure!(launch_pad.is_paused(), LaunchPadError::Paused);
-    ensure!(launch_pad.is_canceled(), LaunchPadError::Canceled);
+    ensure!(!launch_pad.is_paused(), LaunchPadError::Paused);
+    ensure!(!launch_pad.is_canceled(), LaunchPadError::Canceled);
     ensure!(!launch_pad.is_finished(ctx), LaunchPadError::Finished);
 
     // Verify whether the payable vesting amount received is within the
@@ -448,7 +448,8 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     // Updating the collected investment and allocated tokens sold so far
     // by the product
     launch_pad.collected += amount;
-    launch_pad.product.allocated_tokens -= params.token_amount;
+    launch_pad.sold_tokens += params.token_amount;
+    launch_pad.available_tokens -= params.token_amount;
 
     // Get the amount of tokens allocated for presale by the owner
     let allocated_tokens = launch_pad.product.allocated_tokens;
@@ -477,7 +478,7 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
         let cis2_client = Cis2Client::new(launchpad.get_cis2_contract());
 
         launchpad.allocation_paid = true;
-        launchpad.product.allocated_tokens -= allocated_cut;
+        launchpad.available_tokens -= allocated_cut;
 
         drop(launchpad);
 
@@ -522,7 +523,7 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     contract = "LaunchPad",
     name = "ClaimTokens",
     mutable,
-    parameter = "String",
+    parameter = "ClaimUnLockedParams",
     error = "LaunchPadError"
 )]
 fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
@@ -533,91 +534,60 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
     };
 
     // Reading the product name to identify the launch pad
-    let product_name: ProductName = ctx.parameter_cursor().get()?;
+    let params: ClaimUnLockedParams = ctx.parameter_cursor().get()?;
 
     // Getting the launch pad from state identified by the product name
-    let mut launch_pad = host.state_mut().get_mut_launchpad(product_name)?;
+    let launch_pad = host
+        .state()
+        .get_launchpad(params.product_name.clone())?;
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished. As well as the cliff duration has elapsed
     ensure!(launch_pad.is_canceled(), LaunchPadError::Canceled);
     ensure!(launch_pad.is_finished(ctx), LaunchPadError::Vesting);
-    ensure!(
-        launch_pad.is_cliff_elapsed(ctx),
-        LaunchPadError::CliffNotElapsed
-    );
 
-    let holder_info = launch_pad.get_holder_info(holder)?;
-    let time_now = ctx.metadata().block_time();
+    if let Some(cycle_details) = launch_pad
+        .get_holder_info(holder)?
+        .release_data
+        .unlocked
+        .get(&params.cycle)
+    {
+        let (token_amount, timestamp, claimed) = *cycle_details;
 
-    // Check whether the holder is claiming the first cycle of release
-    // First release cycle is handled differently than the other forth
-    // coming cycles.
-    // Moreover, token releases are made linear over the release cycles,
-    // it means that the tokens are equally distributed for each cycle.
-    let (cycle, claimable) = if holder_info.cycles_rolled == 0 {
-        // Make sure that the current cycle duration has elasped
-        // since the cliff duration
+        // Ensuring that this cycle is not already claimed and cycle
+        // duration of 1 month is passed since the last cycle.
+        ensure!(!claimed, LaunchPadError::Claimed);
         ensure!(
-            time_now
-                .duration_since(launch_pad.lock_up.cliff)
-                .unwrap()
-                .millis()
-                >= CYCLE_DURATION,
+            ctx.metadata().block_time() >= timestamp,
             LaunchPadError::NotElapsed
         );
 
-        // Return the current release cycle count and amount of
-        // claimable tokens
-        (1, holder_info.tokens.0 / launch_pad.lock_up.release_cycles)
-    } else {
-        let last_cycle = holder_info.cycles_rolled;
-        let last_released = holder_info.release_data.unlocked.get(&last_cycle).unwrap();
+        let cis2_contract = launch_pad.get_cis2_contract();
+        let token_id = launch_pad.get_product_token_id();
 
-        // Ensuring that holder is not exceeding the claims more
-        // than the number of release cycles.
-        // Also ensuring that the cycle duration has elapsed since
-        // the last release for the holder
-        ensure!(
-            last_cycle >= launch_pad.lock_up.release_cycles as u8,
-            LaunchPadError::CyclesCompleted
-        );
-        ensure!(
-            time_now.duration_since(last_released.1).unwrap().millis() >= CYCLE_DURATION,
-            LaunchPadError::NotElapsed
-        );
+        // Updating the information regarding the current release cycle
+        // and changing its claimed status to true
+        host.state_mut()
+            .get_mut_launchpad(params.product_name)?
+            .set_holder_unlocked_release_info(holder, params.cycle, true);
 
-        // Return the current release cycle count and amount of
-        // claimable tokens
-        (
-            last_cycle + 1,
-            holder_info.tokens.0 / launch_pad.lock_up.release_cycles,
-        )
-    };
+        // Here are the allocated tokens transfered to the holder based on
+        // the current release cycle count.
+        Cis2Client::new(cis2_contract).transfer(
+            host, 
+            Transfer {
+                token_id,
+                amount: token_amount,
+                from: ctx.self_address().into(),
+                to: holder.into(),
+                data: AdditionalData::empty(),
+            },
+        )?;
+    }
 
-    // Setting the release information regarding the current release
-    // being made for the current holder
-    launch_pad.set_holder_release_info_unlocked(holder, cycle, (claimable.into(), time_now));
-
-    let cis2_client = Cis2Client::new(launch_pad.get_cis2_contract());
-    let token_id = launch_pad.get_product_token_id();
-
-    drop(launch_pad);
-
-    // Here are the allocated tokens transfered to the holder based on
-    // the current release cycle count.
-    cis2_client.transfer::<State, TokenID, TokenAmount, LaunchPadError>(
-        host,
-        Transfer {
-            token_id,
-            amount: claimable.into(),
-            from: ctx.self_address().into(),
-            to: holder.into(),
-            data: AdditionalData::empty(),
-        },
-    )?;
-
-    Ok(())
+    // Return early with error if the cycle number supplied in 
+    // claim params does not exist.
+    Err(LaunchPadError::InCorrect)
 }
 
 #[receive(
@@ -648,7 +618,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished.
-    ensure!(launch_pad.is_canceled(), LaunchPadError::Canceled);
+    ensure!(!launch_pad.is_canceled(), LaunchPadError::Canceled);
     ensure!(!launch_pad.is_completed(), LaunchPadError::Completed);
     ensure!(launch_pad.is_finished(ctx), LaunchPadError::Vesting);
 
@@ -672,7 +642,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // Tokens from the ICO of product will also be locked in liquidity
         // and the amount of tokens will be designated reflected by the base
         // price of the token in ccd and the amount of CCD being locked.
-        let token_lp_alloc = launch_pad.product_base_price().micro_ccd / ccd_lp_alloc.micro_ccd;
+        let tokens_for_lp = ccd_lp_alloc.micro_ccd / launch_pad.product_base_price().micro_ccd;
 
         // Remaining amount in CCD that can be withdrawn after the liquidity
         // allocation
@@ -683,12 +653,8 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         let dex_contract = host.state().dex_address();
         let raised_funds_ccd = launch_pad.collected;
         let liquidity_details = launch_pad.liquidity_details.clone();
-        // TODO
-        //
-        // Need to implement the liquidity logic with DEX integration
-        // to lock the funds before trasfering the funds to the owner
-        //
-        // And pay the the LPTokens bought from the DEX to admin
+        let product_sold_tokens = launch_pad.sold_tokens;
+        let lock_up_release_cycles = launch_pad.lock_up.release_cycles;
 
         // Making DEX as an operator of Launch pad in CIS2 contract
         let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
@@ -714,7 +680,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
                     id: TokenIdVec(token_id.0.to_ne_bytes().into()),
                     address: cis2_contract,
                 },
-                token_amount: token_lp_alloc.into(),
+                token_amount: tokens_for_lp.into(),
             },
             EntrypointName::new_unchecked("addLiquidity"),
             ccd_lp_alloc,
@@ -744,18 +710,18 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         let platform_lp_share =
             (exchange.lp_tokens_supply * host.state().admin_liquidity_share()).0 / 100;
 
-        // Calculating the remaining LPTokens after platform's cut from the 
+        // Calculating the remaining LPTokens after platform's cut from the
         // received LPTokens.
         // Allocated LPTokens are divided in half because, equally half of the
         // LPTokens dividend belongs to the product owner and the other half
         // is distributed among the holders in accordance with their percentage
-        // contribution in the product's launch pad. 
+        // contribution in the product's launch pad.
         // This is all aligned with the platform's policies to prevent rug-pull
         // as much as possible.
         let lp_allocated: TokenAmount =
             ((exchange.lp_tokens_supply - platform_lp_share.into()).0 / 2).into();
 
-        // Transfering the DEX service charges to the platform as the LPTokens. 
+        // Transfering the DEX service charges to the platform as the LPTokens.
         host.invoke_contract(
             &dex_contract,
             &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
@@ -778,8 +744,8 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             .withdrawn = true;
 
         // Updating each holder's information regarding the locked release
-        // cycles. LPTokens will be linearly released over the number of 
-        // months provided by the product owner. 
+        // cycles. LPTokens will be linearly released over the number of
+        // months provided by the product owner.
         // Amount of LPTokens, being released in each cycle for any holder,
         // solely depends on its percentage contribution to the ICO.
         for (_, mut holder_info) in host
@@ -790,22 +756,36 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         {
             let holder_contribution =
                 (holder_info.invested.micro_ccd / raised_funds_ccd.micro_ccd) * 100;
-            let holder_lp_share = (lp_allocated * holder_contribution).0 / 100;
+
+            let holder_lpts = (lp_allocated * holder_contribution).0 / 100;
+
+            let holder_ico_tokens =
+                ((product_sold_tokens - tokens_for_lp.into()) * holder_contribution).0 / 100;
+
+            for i in 0..lock_up_release_cycles {
+                let cycle_count = i + 1;
+                let tokens_release_amount = (holder_ico_tokens / lock_up_release_cycles).into();
+                let timestamp =
+                    ((ctx.metadata().block_time().millis + CYCLE_DURATION) * cycle_count).into();
+
+                holder_info.insert_unlocked_cycle(
+                    cycle_count as u8,
+                    tokens_release_amount,
+                    timestamp,
+                );
+            }
 
             for i in 0..liquidity_details.release_cycles {
-                let lp_amount: TokenAmount =
-                    (holder_lp_share / liquidity_details.release_cycles).into();
+                let lpt_amount = (holder_lpts / liquidity_details.release_cycles).into();
                 let cycle_count = i + 1;
+                let timestamp =
+                    ((ctx.metadata().block_time().millis + CYCLE_DURATION) * cycle_count).into();
 
-                let _ = holder_info.release_data.locked.insert(
+                holder_info.insert_locked_cycle(
                     cycle_count as u8,
-                    (
-                        lp_amount,
-                        exchange.lp_token_id,
-                        ((ctx.metadata().block_time().millis + CYCLE_DURATION) * cycle_count)
-                            .into(),
-                        false,
-                    ),
+                    lpt_amount,
+                    exchange.lp_token_id,
+                    timestamp,
                 );
             }
         }
@@ -814,7 +794,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
 
         // Pre-computing the release cycle information for the product owner
         // locked funds release (LPTokens). For product owner, locked funds
-        // are released over a year from now in 3 cycles which are equally 
+        // are released over a year from now in 3 cycles which are equally
         // separated by 4 months interval.
         // This is all aligned with the platform's policies to prevent rug-pull
         // as much as possible.
@@ -895,7 +875,7 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
             {
                 let (token_amount, lp_token_id, timestamp, claimed) = *locked_cycle_details;
 
-                ensure!(claimed, LaunchPadError::Claimed);
+                ensure!(!claimed, LaunchPadError::Claimed);
                 ensure!(
                     ctx.metadata().block_time() <= timestamp,
                     LaunchPadError::NotElapsed

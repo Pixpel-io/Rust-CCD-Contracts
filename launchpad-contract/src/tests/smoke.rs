@@ -2,10 +2,11 @@ use crate::{
     errors::LaunchPadError,
     params::{
         AddLiquidityParams, ApprovalParams, CreateParams, GetExchangeParams, LockupDetails,
-        TokenInfo,
+        TokenInfo, VestParams,
     },
     response::ExchangeView,
     state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
+    tests::{invest, view_state, HOLDERS},
 };
 use concordium_cis2::{
     OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdVec, UpdateOperator, UpdateOperatorParams,
@@ -15,8 +16,8 @@ use concordium_std::{Address, Amount, Timestamp};
 
 use super::{
     approve_launch_pad, create_launch_pad, deposit_tokens, initialize_chain_and_contracts,
-    mint_token, read_contract, update_contract, view_launch_pad, ADMIN, OWNER,
-    OWNER_TOKEN_ID, OWNER_TOKEN_URL,
+    mint_token, read_contract, update_contract, view_launch_pad, ADMIN, OWNER, OWNER_TOKEN_ID,
+    OWNER_TOKEN_URL,
 };
 
 #[test]
@@ -82,9 +83,42 @@ fn launch_pad_smoke() -> Result<(), LaunchPadError> {
         lp_contract,
     )?;
 
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: PRODUCT_NAME.to_string(),
+            token_amount: 1000.into(),
+        },
+        Amount::from_ccd(5 * 1000),
+        lp_contract,
+    )?;
+
+    invest(
+        &mut chain,
+        HOLDERS[1],
+        VestParams {
+            product_name: PRODUCT_NAME.to_string(),
+            token_amount: 2000.into(),
+        },
+        Amount::from_ccd(5 * 2000),
+        lp_contract,
+    )?;
+
+    invest(
+        &mut chain,
+        HOLDERS[2],
+        VestParams {
+            product_name: PRODUCT_NAME.to_string(),
+            token_amount: 2200.into(),
+        },
+        Amount::from_ccd(5 * 2200),
+        lp_contract,
+    )?;
+    
     let response = view_launch_pad(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract);
 
-    println!("{:?}", response);
+    println!("{:#?}", response);
 
     Ok(())
 }
