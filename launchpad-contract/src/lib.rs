@@ -537,9 +537,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
     let params: ClaimUnLockedParams = ctx.parameter_cursor().get()?;
 
     // Getting the launch pad from state identified by the product name
-    let launch_pad = host
-        .state()
-        .get_launchpad(params.product_name.clone())?;
+    let launch_pad = host.state().get_launchpad(params.product_name.clone())?;
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished. As well as the cliff duration has elapsed
@@ -574,7 +572,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
         // Here are the allocated tokens transfered to the holder based on
         // the current release cycle count.
         Cis2Client::new(cis2_contract).transfer(
-            host, 
+            host,
             Transfer {
                 token_id,
                 amount: token_amount,
@@ -585,7 +583,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
         )?;
     }
 
-    // Return early with error if the cycle number supplied in 
+    // Return early with error if the cycle number supplied in
     // claim params does not exist.
     Err(LaunchPadError::InCorrect)
 }

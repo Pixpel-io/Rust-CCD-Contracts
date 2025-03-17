@@ -334,17 +334,15 @@ fn update_operator_of(
         operator: operator_to_be,
     }]);
 
-    let payload = UpdateContractPayload {
-        amount: Amount::zero(),
-        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.updateOperator".to_string()),
-        address: cis2_contract,
-        message: OwnedParameter::from_serial(&update_operator_params)
-            .expect("[Error] Unable to serialize UpdateOperator params"),
-    };
-
-    let _ = chain
-        .contract_update(SIGNER, invoker, sender, Energy::from(10000), payload)
-        .expect("[Error] Unable to Update Operator, invocation failed");
+    let () = update_contract(
+        chain,
+        cis2_contract,
+        invoker,
+        update_operator_params,
+        None,
+        "cis2_multi.updateOperator",
+    )
+    .expect("[Error] While invoking update_operator");
 }
 
 /// A helper function which invokes `cis2_multi` to check if an account or contract is
@@ -365,21 +363,33 @@ fn ensure_is_operator_of(
         }],
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::zero(),
-        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.operatorOf".to_string()),
-        address: cis2_contract,
-        message: OwnedParameter::from_serial(&is_operator_params)
-            .expect("[Error] Unable to serialize UpdateOperator params"),
-    };
-
-    let response: OperatorOfQueryResponse = chain
-        .contract_invoke(invoker, sender, Energy::from(10000), payload)
-        .expect("[Error] Unable to Update Operator, invocation failed")
-        .parse_return_value()
-        .expect("[Error] Unable parse OperatorOfQueryResponse");
+    let response: OperatorOfQueryResponse = update_contract(
+        chain,
+        cis2_contract,
+        invoker,
+        is_operator_params,
+        None,
+        "cis2_multi.operatorOf",
+    )
+    .expect("[Error] While invoking ensure_is_operator");
 
     response.0[0]
+}
+
+fn withdraw_raised_funds(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    params: String,
+    contract: ContractAddress,
+) -> Result<(), LaunchPadError> {
+    update_contract(
+        chain,
+        contract,
+        invoker,
+        params,
+        None,
+        "LaunchPad.WithdrawFunds",
+    )
 }
 
 fn invest(
@@ -387,7 +397,7 @@ fn invest(
     invoker: AccountAddress,
     params: VestParams,
     amount: Amount,
-    contract: ContractAddress
+    contract: ContractAddress,
 ) -> Result<(), LaunchPadError> {
     update_contract(
         chain,
