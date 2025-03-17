@@ -1,4 +1,4 @@
-use crate::errors::VestingError;
+use crate::errors::LaunchPadError;
 use concordium_cis2::*;
 use concordium_std::{collections::BTreeMap, *};
 
@@ -7,7 +7,7 @@ pub type TotalHolders = u32;
 /// single holder amount
 pub type TotalHolderAmount = u64;
 // its and id and total launchpad at same time
-pub type LaunchpadID = u64;
+pub type LaunchPadID = u64;
 
 pub type ReleaseCycles = u8;
 
@@ -19,7 +19,7 @@ pub type ContractTokenId = TokenIdU8;
 
 pub type ContractTokenAmount = TokenAmountU64;
 
-pub type ContractResult<A> = Result<A, VestingError>;
+pub type ContractResult<A> = Result<A, LaunchPadError>;
 
 #[derive(Serial, Deserial, SchemaType, Clone, Debug)]
 pub struct ReleaseData {
@@ -67,12 +67,12 @@ pub struct LockupDetails {
 
 #[derive(Serialize, Clone)]
 struct State {
-    total_launchpad: LaunchpadID, // length of launchpad
-    launchpad: BTreeMap<LaunchpadID, Launchpad>,
+    total_launchpad: LaunchPadID, // length of launchpad
+    launchpad: BTreeMap<LaunchPadID, Launchpad>,
     admin: AccountAddress,
-    lockup_details: BTreeMap<LaunchpadID, LockupDetails>,
+    lockup_details: BTreeMap<LaunchPadID, LockupDetails>,
 }
 
-pub type VestingResult<T> = Result<T, VestingError>;
+pub type LaunchPadResult<T> = Result<T, LaunchPadError>;
 
 // Contract functions
