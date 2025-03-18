@@ -38,15 +38,11 @@ pub struct AllLaunchPads {
 #[derive(Serialize, SchemaType, Debug)]
 pub struct LaunchPadView {
     pub product: ProductView,
-    // #[derivative(Debug(format_with = "debug_amount"))]
     pub raised: Amount,
     pub status: LaunchPadStatus,
-    // #[derivative(Debug(format_with = "debug_holders"))]
     pub holders: Vec<(AccountAddress, HolderView)>,
     pub vest_limits: VestingLimits,
-    // #[derivative(Debug(format_with = "debug_amount"))]
     pub soft_cap: Amount,
-    // #[derivative(Debug(format_with = "debug_optional_amount"))]
     pub hard_cap: Option<Amount>,
     pub allocation_paid: bool,
     pub liquidity_paid: bool,
@@ -86,11 +82,8 @@ impl From<LaunchPadState<'_>> for LaunchPadView {
 #[derive(Serialize, SchemaType, Debug)]
 pub struct ProductView {
     pub name: ProductName,
-    // #[derivative(Debug(format_with = "account_address"))]
     pub owner: AccountAddress,
-    // #[derivative(Debug(format_with = "debug_tokens_amount"))]
     pub allocated_tokens: TokenAmount,
-    // #[derivative(Debug(format_with = "debug_amount"))]
     pub base_price: Amount,
 }
 
@@ -107,9 +100,7 @@ impl From<Product> for ProductView {
 
 #[derive(Serialize, SchemaType, Debug)]
 pub struct HolderView {
-    // #[derivative(Debug(format_with = "debug_tokens_amount"))]
     pub tokens: TokenAmount,
-    // #[derivative(Debug(format_with = "debug_amount"))]
     pub invested: Amount,
     pub unlocked_release: Vec<(u8, UnlockedWrapper)>,
     pub locked_release: Vec<(u8, LockedWrapper)>,
@@ -136,7 +127,7 @@ impl From<StateRef<'_, HolderInfo>> for HolderView {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 pub struct UnlockedWrapper(pub (TokenAmount, Timestamp, bool));
 
 impl SchemaType for UnlockedWrapper {
@@ -151,14 +142,26 @@ impl SchemaType for UnlockedWrapper {
     }
 }
 
+impl concordium_std::fmt::Debug for UnlockedWrapper {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "({} tokens, {} millis, {})", self.0.0.0, self.0.1.millis, self.0.2)   
+    }
+}
+
 impl From<(TokenAmount, Timestamp, bool)> for UnlockedWrapper {
     fn from(value: (TokenAmount, Timestamp, bool)) -> Self {
         Self(value)
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize)]
 pub struct LockedWrapper(pub (TokenAmount, TokenIdU64, Timestamp, bool));
+
+impl concordium_std::fmt::Debug for LockedWrapper {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "({} tokens, {} token_id, {} millis, {})", self.0.0.0, self.0.1.0, self.0.2.millis, self.0.3)   
+    }
+}
 
 impl SchemaType for LockedWrapper {
     fn get_type() -> crate::schema::Type {
@@ -188,39 +191,3 @@ pub struct ExchangeView {
     pub lp_tokens_supply: TokenAmount,
     pub lp_tokens_holder_balance: TokenAmount,
 }
-
-// fn account_address(address: &AccountAddress, f: &mut concordium_std::fmt::Formatter) -> std::fmt::Result {
-//     write!(f, "AccountAddress({:?})", address.to_string())
-// }
-
-// fn debug_holders(
-//     holders: &Vec<(AccountAddress, HolderView)>,
-//     f: &mut concordium_std::fmt::Formatter,
-// ) -> std::fmt::Result {
-//     writeln!(f, "[")?;
-//     for holder in holders {
-//         writeln!(f, "\tAccountAddress({:?}),", holder.0.to_string())?;
-//         writeln!(f, "\t{:#?}", holder.1)?
-//     }
-//     writeln!(f, "]")?;
-//     Ok(())
-// }
-
-// pub fn debug_amount(amount: &Amount, f: &mut concordium_std::fmt::Formatter) -> std::fmt::Result {
-//     write!(f, "{} CCD", amount.micro_ccd / 1000000)
-// }
-
-// fn debug_optional_amount(amount: &Option<Amount>, f: &mut concordium_std::fmt::Formatter) -> std::fmt::Result {
-//     match amount {
-//         Some(amnt) => write!(f, "{} CCD", amnt.micro_ccd / 1000000),
-//         None => write!(f, "0 CCD"),
-//     }
-// }
-
-// pub fn debug_tokens_amount(amount: &TokenAmount, f: &mut concordium_std::fmt::Formatter) -> std::fmt::Result {
-//     write!(f, "{} tokens", amount.0)
-// }
-
-// pub fn debug_timestamp(timestamp: &Timestamp, f: &mut concordium_std::fmt::Formatter) -> std::fmt::Result {
-//     write!(f, "{} millis", timestamp.millis)
-// }

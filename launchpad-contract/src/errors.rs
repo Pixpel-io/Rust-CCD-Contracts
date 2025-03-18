@@ -59,18 +59,6 @@ pub enum LaunchPadError {
     DEX(i32),
 }
 
-// pub enum DexError<T> {
-//     InvokeContractError(CallContractError<T>)
-// }
-
-// impl From<DexError<LaunchPadError>> for LaunchPadError {
-//     fn from(e: DexError<LaunchPadError>) -> Self {
-//         match e {
-//             DexError::InvokeContractError(err) => err.into(),
-//         }
-//     }
-// }
-
 impl From<CallContractError<LaunchPadError>> for LaunchPadError {
     fn from(e: CallContractError<LaunchPadError>) -> Self {
         match e {
@@ -149,9 +137,8 @@ impl From<ContractInvokeError> for LaunchPadError {
         if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
             if let InvokeFailure::ContractReject { code, data } = failure_kind {
                 println!("{code} {:?}", from_bytes::<LaunchPadError>(&data));
+                from_bytes::<LaunchPadError>(&data).expect("[Error] Parse Launch-pad error")
                 // code.into()
-                from_bytes::<LaunchPadError>(&data)
-                    .expect("[Error] Unable to parse Launch pad error from bytes")
             } else {
                 panic!("[Error] Unable to map received invocation error code")
             }

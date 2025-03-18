@@ -661,12 +661,15 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         let lock_up_release_cycles = launch_pad.lock_up.release_cycles;
 
         // Making DEX as an operator of Launch pad in CIS2 contract
-        // let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
-        //     cis2_contract,
-        // )
-        // .update_operator(host, host.state().dex_address().into(), OperatorUpdate::Add);
-        let response = update_operator_of(host, cis2_contract, dex_contract.into())?;
-        // ensure!(response, LaunchPadError::UpdateOperatorFailed);
+        update_operator_of(host, cis2_contract, dex_contract.into())?;
+
+        // Ensure that DEX has been added as the oprators
+        let response = Cis2Client::new(cis2_contract).operator_of(
+            host,
+            ctx.self_address().into(),
+            host.state().dex_address().into(),
+        )?;
+        ensure!(response, LaunchPadError::UpdateOperatorFailed);
 
         // match response {
         //     Ok(added) => {
@@ -716,13 +719,16 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         //     .unwrap()
         //     .get()?;
 
-        let exchange = DexClient::new(dex_contract).get_exchange(host, &GetExchangeParams {
-            holder: Address::Contract(ctx.self_address()),
-            token: TokenInfo {
-                id: TokenIdVec(token_id.0.to_ne_bytes().into()),
-                address: cis2_contract,
+        let exchange = DexClient::new(dex_contract).get_exchange(
+            host,
+            &GetExchangeParams {
+                holder: Address::Contract(ctx.self_address()),
+                token: TokenInfo {
+                    id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+                    address: cis2_contract,
+                },
             },
-        })?;
+        )?;
 
         // Platform will charge a certain amount from allocated liquidity
         // in exchange of DEX services it provides to the product.
@@ -740,7 +746,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // This is all aligned with the platform's policies to prevent rug-pull
         // as much as possible.
         let lp_allocated: TokenAmount =
-            ((exchange.lp_tokens_supply - platform_lp_share.into()).0 / 2).into();
+            ((exchange.lp_tokens_supply.0 - platform_lp_share) / 2).into();
 
         // Transfering the DEX service charges to the platform as the LPTokens.
         // host.invoke_contract(
@@ -787,7 +793,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             .get_holders_mut()
         {
             let holder_contribution =
-                (holder_info.invested.micro_ccd / raised_funds_ccd.micro_ccd) * 100;
+                (holder_info.invested.micro_ccd * 100) / raised_funds_ccd.micro_ccd ;
 
             let holder_lpts = (lp_allocated * holder_contribution).0 / 100;
 

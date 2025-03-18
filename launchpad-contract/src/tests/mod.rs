@@ -94,6 +94,14 @@ pub fn initialize_chain_and_contracts() -> (
         TokenAmount(10000u64),
     );
 
+    // Load and deploy the DEX (Pixpel swap) module.
+    let dex_contract = initialize_contract(
+        &mut chain,
+        "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
+        "pixpel_swap".into(),
+        (),
+    );
+
     // Load and deploy the main Launch Pad module.
     let launch_pad_contract = initialize_contract(
         &mut chain,
@@ -104,16 +112,8 @@ pub fn initialize_chain_and_contracts() -> (
             registeration_fee: PLATFORM_REG_FEE,
             liquidity_share: LIQUID_SHARE,
             allocation_share: ALLOC_SHARE,
-            dex_address: ContractAddress::new(1001, 0),
+            dex_address: dex_contract,
         },
-    );
-
-    // Load and deploy the DEX (Pixpel swap) module.
-    let dex_contract = initialize_contract(
-        &mut chain,
-        "../nft-auction/test-build-artifacts/pixpel_swap.wasm.v1".into(),
-        "pixpel_swap".into(),
-        (),
     );
 
     (
@@ -182,7 +182,7 @@ where
         SIGNER,
         invoker,
         Address::Account(invoker),
-        Energy::from(10000),
+        Energy::from(20000),
         payload,
     );
 
