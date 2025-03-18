@@ -11,8 +11,10 @@ use concordium_std::{
     InitContext, InitResult, Logger, ReceiveContext, Reject, Serial, StateBuilder, UnwrapAbort,
     Write, *,
 };
+use dex::DexClient;
 use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
+use helper::update_operator_of;
 use params::{
     AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer,
     CreateParams, GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
@@ -22,11 +24,15 @@ use state::{HolderInfo, LaunchPad, LaunchPadStatus, LiquidityDetails, Release, S
 // use types::ContractResult;
 
 // mod contract;
+// mod cis2_client;
+mod dex;
 mod errors;
 mod events;
+mod helper;
 mod params;
 mod response;
 mod state;
+
 // mod types;
 
 #[cfg(test)]
@@ -655,51 +661,68 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         let lock_up_release_cycles = launch_pad.lock_up.release_cycles;
 
         // Making DEX as an operator of Launch pad in CIS2 contract
-        let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
-            cis2_contract,
-        )
-        .update_operator(host, host.state().dex_address().into(), OperatorUpdate::Add);
+        // let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
+        //     cis2_contract,
+        // )
+        // .update_operator(host, host.state().dex_address().into(), OperatorUpdate::Add);
+        let response = update_operator_of(host, cis2_contract, dex_contract.into())?;
+        // ensure!(response, LaunchPadError::UpdateOperatorFailed);
 
-        match response {
-            Ok(added) => {
-                ensure!(added, LaunchPadError::UpdateOperatorFailed)
-            }
-            Err(e) => {
-                bail!(e.into())
-            }
-        }
+        // match response {
+        //     Ok(added) => {
+        //         ensure!(added, LaunchPadError::UpdateOperatorFailed)
+        //     }
+        //     Err(e) => {
+        //         bail!(e.into())
+        //     }
+        // }
 
         // Adding the liquidity to the Platform's DEX and invoking
         // DEX to get the assigned LPTokens against the liquidity.
-        host.invoke_contract(
-            &dex_contract,
-            &AddLiquidityParams {
-                token: TokenInfo {
-                    id: TokenIdVec(token_id.0.to_ne_bytes().into()),
-                    address: cis2_contract,
-                },
-                token_amount: tokens_for_lp.into(),
-            },
-            EntrypointName::new_unchecked("addLiquidity"),
+        // host.invoke_contract(
+        //     &dex_contract,
+        //     &AddLiquidityParams {
+        //         token: TokenInfo {
+        //             id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+        //             address: cis2_contract,
+        //         },
+        //         token_amount: tokens_for_lp.into(),
+        //     },
+        //     EntrypointName::new_unchecked("addLiquidity"),
+        //     ccd_lp_alloc,
+        // )?;
+        DexClient::new(dex_contract).add_liquidity(
+            host,
+            token_id,
+            tokens_for_lp.into(),
             ccd_lp_alloc,
+            cis2_contract,
         )?;
 
-        let exchange: ExchangeView = host
-            .invoke_contract(
-                &dex_contract,
-                &GetExchangeParams {
-                    holder: Address::Contract(ctx.self_address()),
-                    token: TokenInfo {
-                        id: TokenIdVec(token_id.0.to_ne_bytes().into()),
-                        address: cis2_contract,
-                    },
-                },
-                EntrypointName::new_unchecked("getExchange"),
-                Amount::zero(),
-            )?
-            .1
-            .unwrap()
-            .get()?;
+        // let exchange: ExchangeView = host
+        //     .invoke_contract(
+        //         &dex_contract,
+        //         &GetExchangeParams {
+        //             holder: Address::Contract(ctx.self_address()),
+        //             token: TokenInfo {
+        //                 id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+        //                 address: cis2_contract,
+        //             },
+        //         },
+        //         EntrypointName::new_unchecked("getExchange"),
+        //         Amount::zero(),
+        //     )?
+        //     .1
+        //     .unwrap()
+        //     .get()?;
+
+        let exchange = DexClient::new(dex_contract).get_exchange(host, &GetExchangeParams {
+            holder: Address::Contract(ctx.self_address()),
+            token: TokenInfo {
+                id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+                address: cis2_contract,
+            },
+        })?;
 
         // Platform will charge a certain amount from allocated liquidity
         // in exchange of DEX services it provides to the product.
@@ -720,17 +743,28 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             ((exchange.lp_tokens_supply - platform_lp_share.into()).0 / 2).into();
 
         // Transfering the DEX service charges to the platform as the LPTokens.
-        host.invoke_contract(
-            &dex_contract,
-            &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+        // host.invoke_contract(
+        //     &dex_contract,
+        //     &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+        //         token_id: exchange.lp_token_id,
+        //         amount: platform_lp_share.into(),
+        //         from: ctx.self_address().into(),
+        //         to: concordium_cis2::Receiver::Account(host.state().admin_address()),
+        //         data: AdditionalData::empty(),
+        //     }]),
+        //     EntrypointName::new_unchecked("transfer"),
+        //     Amount::zero(),
+        // )?;
+
+        DexClient::new(host.state().dex_address()).transfer(
+            host,
+            TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
                 token_id: exchange.lp_token_id,
                 amount: platform_lp_share.into(),
                 from: ctx.self_address().into(),
                 to: concordium_cis2::Receiver::Account(host.state().admin_address()),
                 data: AdditionalData::empty(),
             }]),
-            EntrypointName::new_unchecked("transfer"),
-            Amount::zero(),
         )?;
 
         // Transfering the withdrawable amount to the owner in CCD
@@ -890,18 +924,35 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
         }
     };
 
-    host.invoke_contract(
-        &host.state().dex_address(),
-        &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+    DexClient::new(host.state().dex_address()).transfer(
+        host,
+        TransferParams(vec![Transfer {
             token_id: tokend_id,
             amount: token_amount,
             from: ctx.self_address().into(),
             to: concordium_cis2::Receiver::Account(sender),
             data: AdditionalData::empty(),
         }]),
-        EntrypointName::new_unchecked("transfer"),
-        Amount::zero(),
     )?;
+    // let result = host.invoke_contract(
+    //     &host.state().dex_address(),
+    //     &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+    //         token_id: tokend_id,
+    //         amount: token_amount,
+    //         from: ctx.self_address().into(),
+    //         to: concordium_cis2::Receiver::Account(sender),
+    //         data: AdditionalData::empty(),
+    //     }]),
+    //     EntrypointName::new_unchecked("transfer"),
+    //     Amount::zero(),
+    // );
+
+    // match result {
+    //     Ok(_) => Ok(()),
+    //     Err(err) => {
+
+    //     }
+    // }
 
     Ok(())
 }

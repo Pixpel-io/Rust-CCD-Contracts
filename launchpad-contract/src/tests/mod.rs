@@ -284,7 +284,7 @@ pub fn mint_token(
 ///
 /// This is useful for integration testing
 pub fn get_token_balance(
-    chain: &Chain,
+    chain: &mut Chain,
     invoker: AccountAddress,
     balance_of: Address,
     cis2_contract: ContractAddress,
@@ -297,25 +297,32 @@ pub fn get_token_balance(
         }],
     };
 
-    let payload = UpdateContractPayload {
-        amount: Amount::zero(),
-        receive_name: OwnedReceiveName::new_unchecked("cis2_multi.balanceOf".to_string()),
-        address: cis2_contract,
-        message: OwnedParameter::from_serial(&balance_of_params).expect("BalanceOf params"),
-    };
+    read_contract(
+        chain,
+        cis2_contract,
+        invoker,
+        balance_of_params,
+        "cis2_multi.balanceOf",
+    )
+    // let payload = UpdateContractPayload {
+    //     amount: Amount::zero(),
+    //     receive_name: OwnedReceiveName::new_unchecked("cis2_multi.balanceOf".to_string()),
+    //     address: cis2_contract,
+    //     message: OwnedParameter::from_serial(&balance_of_params).expect("BalanceOf params"),
+    // };
 
-    let invoke = chain
-        .contract_invoke(
-            invoker,
-            Address::Account(invoker),
-            Energy::from(10000),
-            payload,
-        )
-        .expect("[Error] Balance_Of query Invocation failed");
+    // let invoke = chain
+    //     .contract_invoke(
+    //         invoker,
+    //         Address::Account(invoker),
+    //         Energy::from(10000),
+    //         payload,
+    //     )
+    //     .expect("[Error] Balance_Of query Invocation failed");
 
-    invoke
-        .parse_return_value()
-        .expect("[Error] Unable to deserialize response Balance_Of quary")
+    // invoke
+    //     .parse_return_value()
+    //     .expect("[Error] Unable to deserialize response Balance_Of quary")
 }
 
 /// A helper function which invokes `cis2_multi` contract to update the operator of a certain

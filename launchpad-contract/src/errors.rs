@@ -1,14 +1,13 @@
-use concordium_cis2::Cis2ClientError;
+use concordium_cis2::{Cis2ClientError, Cis2Error};
 use concordium_std::{
-    CallContractError, LogError, ParseError, Reject, SchemaType, Serialize, TransferError,
-    UnwrapAbort,
+    from_bytes, CallContractError, Deserial, LogError, ParseError, Reject, SchemaType, Serialize,
+    TransferError, UnwrapAbort,
 };
 
 pub mod num {
     pub use concordium_std::num::NonZeroI32;
 }
 
-#[repr(i32)]
 #[derive(Serialize, Debug, PartialEq, Reject, Eq, SchemaType)]
 pub enum LaunchPadError {
     /// Raised when parsing the parameter failed.
@@ -56,7 +55,37 @@ pub enum LaunchPadError {
     CyclesCompleted,
     Completed,
     UpdateOperatorFailed,
-    LogicReject(i32),
+    CIS2(i32),
+    DEX(i32),
+}
+
+// pub enum DexError<T> {
+//     InvokeContractError(CallContractError<T>)
+// }
+
+// impl From<DexError<LaunchPadError>> for LaunchPadError {
+//     fn from(e: DexError<LaunchPadError>) -> Self {
+//         match e {
+//             DexError::InvokeContractError(err) => err.into(),
+//         }
+//     }
+// }
+
+impl From<CallContractError<LaunchPadError>> for LaunchPadError {
+    fn from(e: CallContractError<LaunchPadError>) -> Self {
+        match e {
+            CallContractError::AmountTooLarge => Self::AmountTooLarge,
+            CallContractError::MissingAccount => Self::MissingAccount,
+            CallContractError::MissingContract => Self::MissingContract,
+            CallContractError::MissingEntrypoint => Self::MissingEntrypoint,
+            CallContractError::MessageFailed => Self::MessageFailed,
+            CallContractError::LogicReject {
+                reason,
+                return_value: _,
+            } => Self::DEX(reason),
+            CallContractError::Trap => Self::Trap,
+        }
+    }
 }
 
 impl From<TransferError> for LaunchPadError {
@@ -89,8 +118,8 @@ impl From<Cis2ClientError<LaunchPadError>> for LaunchPadError {
 }
 
 /// Mapping CallContractError<ExternCallResponse> to Error.
-impl<T> From<CallContractError<T>> for LaunchPadError {
-    fn from(e: CallContractError<T>) -> Self {
+impl From<CallContractError<Cis2Error<LaunchPadError>>> for LaunchPadError {
+    fn from(e: CallContractError<Cis2Error<LaunchPadError>>) -> Self {
         match e {
             CallContractError::AmountTooLarge => Self::AmountTooLarge,
             CallContractError::MissingAccount => Self::MissingAccount,
@@ -100,7 +129,7 @@ impl<T> From<CallContractError<T>> for LaunchPadError {
             CallContractError::LogicReject {
                 reason,
                 return_value: _,
-            } => Self::LogicReject(reason),
+            } => Self::CIS2(reason),
             CallContractError::Trap => Self::Trap,
         }
     }
@@ -118,8 +147,11 @@ use concordium_smart_contract_testing::{
 impl From<ContractInvokeError> for LaunchPadError {
     fn from(value: ContractInvokeError) -> Self {
         if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
-            if let InvokeFailure::ContractReject { code, data: _ } = failure_kind {
-                code.into()
+            if let InvokeFailure::ContractReject { code, data } = failure_kind {
+                println!("{code} {:?}", from_bytes::<LaunchPadError>(&data));
+                // code.into()
+                from_bytes::<LaunchPadError>(&data)
+                    .expect("[Error] Unable to parse Launch pad error from bytes")
             } else {
                 panic!("[Error] Unable to map received invocation error code")
             }
@@ -179,7 +211,9 @@ impl From<i32> for LaunchPadError {
             -41 => Self::CyclesCompleted,
             -42 => Self::Completed,
             -43 => Self::UpdateOperatorFailed,
-            n => Self::LogicReject(n),
+            -44 => Self::CIS2(0),
+            -45 => Self::DEX(0),
+            _ => panic!("Error code does not represent a valid error in contract"),
         }
     }
 }

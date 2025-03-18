@@ -6,7 +6,7 @@ use crate::{
     },
     response::ExchangeView,
     state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
-    tests::{invest, view_state, withdraw_raised_funds, HOLDERS},
+    tests::{get_token_balance, invest, view_state, withdraw_raised_funds, HOLDERS},
 };
 use concordium_cis2::{
     OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdVec, UpdateOperator, UpdateOperatorParams,
@@ -118,10 +118,15 @@ fn launch_pad_smoke() -> Result<(), LaunchPadError> {
 
     let _ = chain.tick_block_time(Duration::from_millis(3500));
 
+    let response = view_launch_pad(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract);
+    println!("{:#?}", response);
+    
+    // let tokens_balance = get_token_balance(&mut chain, ADMIN, Address::Contract(lp_contract), cis2_contract, OWNER_TOKEN_ID);
+    // println!("{:#?}", tokens_balance);
+
     withdraw_raised_funds(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract)?;
 
     let response = view_launch_pad(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract);
-
     println!("{:#?}", response);
 
     Ok(())
