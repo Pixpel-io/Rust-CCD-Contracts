@@ -1,5 +1,5 @@
 use crate::{
-    errors::LaunchPadError,
+    errors::Error,
     params::{ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, CreateParams, VestParams},
     response::LaunchPadView,
     state::Admin,
@@ -155,7 +155,7 @@ fn update_contract<P, R>(
     params: P,
     payable: Option<Amount>,
     receive_name: &str,
-) -> Result<R, LaunchPadError>
+) -> Result<R, Error>
 where
     P: Serial,
     R: Deserial,
@@ -333,7 +333,7 @@ fn claim_locked_tokens(
     invoker: AccountAddress,
     params: ClaimLockedParams,
     contract: ContractAddress,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     update_contract(
         chain,
         contract,
@@ -351,7 +351,7 @@ fn claim_tokens(
     invoker: AccountAddress,
     params: ClaimUnLockedParams,
     contract: ContractAddress,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     update_contract(
         chain,
         contract,
@@ -370,7 +370,7 @@ fn withdraw_raised_funds(
     invoker: AccountAddress,
     params: String,
     contract: ContractAddress,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     update_contract(
         chain,
         contract,
@@ -388,7 +388,7 @@ fn invest(
     params: VestParams,
     amount: Amount,
     contract: ContractAddress,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     update_contract(
         chain,
         contract,
@@ -406,7 +406,7 @@ fn deposit_tokens(
     product_name: String,
     cis2_contract: ContractAddress,
     launch_pad_contract: ContractAddress,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     let transfer_params = TransferParams(vec![Transfer {
         token_id: OWNER_TOKEN_ID,
         amount: TokenAmount(10000),
@@ -435,7 +435,7 @@ fn approve_launch_pad(
     invoker: AccountAddress,
     params: ApprovalParams,
     contract: ContractAddress,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     update_contract(
         chain,
         contract,
@@ -474,7 +474,7 @@ fn create_launch_pad(
     contract: ContractAddress,
     invoker: AccountAddress,
     add_params: CreateParams,
-) -> Result<(), LaunchPadError> {
+) -> Result<(), Error> {
     update_contract(
         chain,
         contract,

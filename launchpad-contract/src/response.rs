@@ -12,13 +12,6 @@ use concordium_std::{
     AccountAddress, Amount, Deserial, SchemaType, Serial, Serialize, StateRef, Timestamp,
 };
 
-// #[derive(Serialize, SchemaType)]
-// pub struct VestingView {
-//     pub total_launchpad: LaunchPadID, // length of launchpad
-//     pub launchpad: BTreeMap<LaunchPadID, Launchpad>,
-//     pub lockup_details: BTreeMap<LaunchPadID, LockupDetails>,
-// }
-
 pub type LaunchPadsView = Vec<LaunchPadView>;
 
 #[derive(Serial, Deserial, SchemaType, Debug)]

@@ -6,7 +6,7 @@ use concordium_std::{
 };
 
 use crate::{
-    errors::LaunchPadError,
+    errors::Error,
     params::{AddLiquidityParams, GetExchangeParams, TokenInfo},
     response::ExchangeView,
     state::State,
@@ -35,7 +35,7 @@ impl DexClient {
         &self,
         host: &mut Host<State>,
         params: &GetExchangeParams,
-    ) -> Result<ExchangeView, LaunchPadError> {
+    ) -> Result<ExchangeView, Error> {
         let result = self.invoke_contract::<_, ExchangeView>(
             host,
             params,
@@ -52,7 +52,7 @@ impl DexClient {
         token_amount: TokenAmountU64,
         amount: Amount,
         cis2_contract: ContractAddress,
-    ) -> Result<(), LaunchPadError> {
+    ) -> Result<(), Error> {
         self.invoke_contract::<_, ()>(
             host,
             &AddLiquidityParams {
@@ -73,7 +73,7 @@ impl DexClient {
         &self,
         host: &mut Host<State>,
         params: TransferParams<T, A>,
-    ) -> Result<bool, LaunchPadError>
+    ) -> Result<bool, Error>
     where
         T: IsTokenId,
         A: IsTokenAmount,
@@ -89,7 +89,7 @@ impl DexClient {
         params: &P,
         method: EntrypointName,
         amount: Amount,
-    ) -> Result<(bool, Option<R>), LaunchPadError>
+    ) -> Result<(bool, Option<R>), Error>
     where
         P: Serial,
         R: Deserial,
@@ -106,16 +106,16 @@ impl DexClient {
             }
             Err(err) => {
                 let lp_err = match err {
-                    CallContractError::AmountTooLarge => LaunchPadError::AmountTooLarge,
-                    CallContractError::MessageFailed => LaunchPadError::MessageFailed,
-                    CallContractError::Trap => LaunchPadError::Trap,
-                    CallContractError::MissingAccount => LaunchPadError::MissingAccount,
-                    CallContractError::MissingContract => LaunchPadError::MissingContract,
-                    CallContractError::MissingEntrypoint => LaunchPadError::MissingEntrypoint,
+                    CallContractError::AmountTooLarge => Error::AmountTooLarge,
+                    CallContractError::MessageFailed => Error::MessageFailed,
+                    CallContractError::Trap => Error::Trap,
+                    CallContractError::MissingAccount => Error::MissingAccount,
+                    CallContractError::MissingContract => Error::MissingContract,
+                    CallContractError::MissingEntrypoint => Error::MissingEntrypoint,
                     CallContractError::LogicReject {
                         reason,
                         return_value: _,
-                    } => LaunchPadError::DEX(reason),
+                    } => Error::DEX(reason),
                 };
 
                 return Err(lp_err);

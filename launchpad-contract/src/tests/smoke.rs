@@ -1,5 +1,5 @@
 use crate::{
-    errors::LaunchPadError,
+    errors::Error,
     params::{
         AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams, GetExchangeParams, LockupDetails, TokenInfo, VestParams
     },
@@ -21,7 +21,7 @@ use super::{
 };
 
 #[test]
-fn launch_pad_smoke() -> Result<(), LaunchPadError> {
+fn launch_pad_smoke() -> Result<(), Error> {
     let (mut chain, _, lp_contract, cis2_contract, dex_contract) = initialize_chain_and_contracts();
 
     mint_token(
@@ -218,7 +218,7 @@ fn launch_pad_smoke() -> Result<(), LaunchPadError> {
 }
 
 #[test]
-fn dex_liquid_smoke() -> Result<(), LaunchPadError> {
+fn dex_liquid_smoke() -> Result<(), Error> {
     let (mut chain, _, _, cis2_addr, dex_contract) = initialize_chain_and_contracts();
 
     mint_token(

@@ -6,7 +6,7 @@ use concordium_std::{
 };
 
 use crate::{
-    errors::LaunchPadError,
+    errors::Error,
     params::{CreateParams, Months},
     ProductName,
 };
@@ -75,12 +75,12 @@ impl State {
     pub fn get_mut_launchpad(
         &mut self,
         product_name: String,
-    ) -> Result<LaunchPadStateMut<'_>, LaunchPadError> {
+    ) -> Result<LaunchPadStateMut<'_>, Error> {
         if let Some(launchpad) = self.launchpads.get_mut(&product_name) {
             return Ok(launchpad);
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 
     /// Gets the immutable reference to `LaunchPad` by product name with
@@ -90,23 +90,23 @@ impl State {
     pub fn get_launchpad(
         &self,
         product_name: String,
-    ) -> Result<LaunchPadState<'_>, LaunchPadError> {
+    ) -> Result<LaunchPadState<'_>, Error> {
         if let Some(launchpad) = self.launchpads.get(&product_name) {
             return Ok(launchpad);
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 
     pub fn my_launch_pads(
         &self,
         holder: AccountAddress,
-    ) -> Result<Vec<ProductName>, LaunchPadError> {
+    ) -> Result<Vec<ProductName>, Error> {
         if let Some(ids) = self.investors.get(&holder) {
             return Ok(ids.clone());
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 }
 
@@ -309,12 +309,12 @@ impl LaunchPad {
     pub fn get_holder_info(
         &self,
         holder: AccountAddress,
-    ) -> Result<StateRef<'_, HolderInfo>, LaunchPadError> {
+    ) -> Result<StateRef<'_, HolderInfo>, Error> {
         if let Some(info) = self.holders.get(&holder) {
             return Ok(info);
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 
     /// Updates the unlocked release data related to a specific holder in the
@@ -574,9 +574,9 @@ impl TimePeriod {
     /// valid realistic range
     ///
     /// Returns `Ok()` or else `VestingError`
-    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), LaunchPadError> {
+    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), Error> {
         if self.start >= self.end && self.end <= current {
-            return Err(LaunchPadError::InCorrect);
+            return Err(Error::InCorrect);
         }
         Ok(())
     }
