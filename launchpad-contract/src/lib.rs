@@ -1,8 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 use concordium_cis2::{
-    AdditionalData, Cis2Client, Cis2ClientError, OnReceivingCis2Params, OperatorUpdate,
-    TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, TokenIdVec, Transfer,
-    TransferParams, UpdateOperator, UpdateOperatorParams,
+    AdditionalData, Cis2Client, OnReceivingCis2Params, TokenAmountU64 as TokenAmount, TokenIdU64,
+    TokenIdU8 as TokenID, TokenIdVec, Transfer, TransferParams,
 };
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
@@ -16,15 +15,12 @@ use errors::LaunchPadError;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
 use helper::update_operator_of;
 use params::{
-    AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer,
-    CreateParams, GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
+    ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams,
+    GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
 };
-use response::{AllLaunchPads, ExchangeView, LaunchPadView, LaunchPadsView, StateView};
-use state::{HolderInfo, LaunchPad, LaunchPadStatus, LiquidityDetails, Release, State, TimePeriod};
-// use types::ContractResult;
+use response::{AllLaunchPads, LaunchPadView, LaunchPadsView, StateView};
+use state::{HolderInfo, LaunchPad, LaunchPadStatus, Release, State, TimePeriod};
 
-// mod contract;
-// mod cis2_client;
 mod dex;
 mod errors;
 mod events;
@@ -32,8 +28,6 @@ mod helper;
 mod params;
 mod response;
 mod state;
-
-// mod types;
 
 #[cfg(test)]
 mod tests;
@@ -795,7 +789,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             .get_holders_mut()
         {
             let holder_contribution =
-                (holder_info.invested.micro_ccd * 100) / raised_funds_ccd.micro_ccd ;
+                (holder_info.invested.micro_ccd * 100) / raised_funds_ccd.micro_ccd;
 
             let holder_lpts = (lp_allocated * holder_contribution).0 / 100;
 

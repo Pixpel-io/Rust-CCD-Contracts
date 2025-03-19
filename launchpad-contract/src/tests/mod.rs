@@ -1,11 +1,12 @@
 use crate::{
     errors::LaunchPadError,
     params::{ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, CreateParams, VestParams},
-    response::{LaunchPadView, StateView},
+    response::LaunchPadView,
     state::Admin,
 };
 use concordium_cis2::{
-    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, OperatorOfQuery, OperatorOfQueryParams, OperatorOfQueryResponse, OperatorUpdate, Receiver, TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, Transfer, TransferParams, UpdateOperator, UpdateOperatorParams
+    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, Receiver,
+    TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, Transfer, TransferParams
 };
 use concordium_smart_contract_testing::{
     module_load_v1, Account, AccountKeys, Chain, Energy, InitContractPayload, Signer,
@@ -17,10 +18,6 @@ use concordium_std::{
     ACCOUNT_ADDRESS_SIZE,
 };
 
-// mod bid;
-// mod cancel;
-// mod finalize;
-// mod item;
 mod smoke;
 
 /// Dummy signer which always signs with one key
@@ -45,10 +42,10 @@ const ALLOC_SHARE: u64 = 1;
 const OWNER_TOKEN_ID: TokenID = TokenID(1);
 const OWNER_TOKEN_URL: &str = "http://some.example/token/0";
 
-/// A helper function to setup and initialize the auction and cis2_multi contracts as mocks
+/// A helper function to setup and initialize the concordium block-chain and deploy the contracts as mocks
 /// for unit testing.
 ///
-/// It is required to build the auction contract in the root as `build/auction.wasm.v1` and
+/// It is required to build the `Dex`, `LaunchPad`, `Cis2_multi` contracts in the root as `build/auction.wasm.v1` and
 /// cis2_multi build should be present in path `test-build-artifacts/cis2multi.wasm.v1`
 pub fn initialize_chain_and_contracts() -> (
     Chain,
@@ -303,68 +300,8 @@ pub fn get_token_balance(
     )
 }
 
-/// A helper function which invokes `cis2_multi` contract to update the operator of a certain
-/// account or contract.
-///
-/// This is useful for integration testing
-fn update_operator_of(
-    chain: &mut Chain,
-    invoker: AccountAddress,
-    sender: Address,
-    operator_to_be: Address,
-    cis2_contract: ContractAddress,
-) {
-    let update_operator_params = UpdateOperatorParams(vec![UpdateOperator {
-        update: OperatorUpdate::Add,
-        operator: operator_to_be,
-    }]);
-
-    let () = update_contract(
-        chain,
-        cis2_contract,
-        invoker,
-        update_operator_params,
-        None,
-        "cis2_multi.updateOperator",
-    )
-    .expect("[Error] While invoking update_operator");
-}
-
-/// A helper function which invokes `cis2_multi` to check if an account or contract is
-/// operator of an owner in ci2_contract
-///
-/// This is useful for integration testing
-fn ensure_is_operator_of(
-    chain: &mut Chain,
-    invoker: AccountAddress,
-    sender: Address,
-    is_operator: Address,
-    cis2_contract: ContractAddress,
-) -> bool {
-    let is_operator_params = OperatorOfQueryParams {
-        queries: vec![OperatorOfQuery {
-            owner: sender,
-            address: is_operator,
-        }],
-    };
-
-    let response: OperatorOfQueryResponse = update_contract(
-        chain,
-        cis2_contract,
-        invoker,
-        is_operator_params,
-        None,
-        "cis2_multi.operatorOf",
-    )
-    .expect("[Error] While invoking ensure_is_operator");
-
-    response.0[0]
-}
-
-/// A helper function which invokes `cis2_multi` contract to get the balance of specific tokens minted
+/// A helper function which invokes `Dex` contract to get the balance of specific LPTokens`
 /// for a specifi account.
-///
-/// This is useful for integration testing
 pub fn get_lp_token_balance(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -388,6 +325,9 @@ pub fn get_lp_token_balance(
     )
 }
 
+/// A helper function which invokes `ClaimLockedTokens` method in launch pad. This
+/// method is invoked by the either the owner or holder to claim their locked funds
+/// in liquidity pool as LPTokens.
 fn claim_locked_tokens(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -404,6 +344,8 @@ fn claim_locked_tokens(
     )
 }
 
+/// A helper function which invokes `ClaimTokens` method in launch pad. This
+/// method is invoked by the holder to claim his tokens bought in launch pad.
 fn claim_tokens(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -420,6 +362,9 @@ fn claim_tokens(
     )
 }
 
+/// A helper function which invokes `WithdrawFunds` method in launch pad. This
+/// method is invoked by the product owner to retrieve the raised amount into
+/// wallet.
 fn withdraw_raised_funds(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -436,6 +381,7 @@ fn withdraw_raised_funds(
     )
 }
 
+/// A helper function which invokes `Vest` method in launch pad contract.
 fn invest(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -452,10 +398,8 @@ fn invest(
         "LaunchPad.Vest",
     )
 }
-/// A helper function which invokes `cis2_multi` to check if an account or contract is
-/// operator of an owner in ci2_contract
-///
-/// This is useful for integration testing
+/// A helper function which invokes `cis2 transfer`, which in turns invokes the
+/// "Depsoit" method in launch pad.
 fn deposit_tokens(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -484,6 +428,8 @@ fn deposit_tokens(
     )
 }
 
+/// A helper function to invoke `ApproveLaunchPad` in contract to approve/reject
+/// the launch pad
 fn approve_launch_pad(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -500,10 +446,10 @@ fn approve_launch_pad(
     )
 }
 
-/// A helper function to invoke `viewItemState` in auction to get a specefic
-/// item's current state in the auction contract
+/// A helper function to invoke `viewLauchPad` in launch pad to get a specefic
+/// launch pad current state in the contract
 ///
-/// Returns the `ItemState` type or panics with error message
+/// Returns the `LaunchPadView` type or panics with error message
 fn view_launch_pad(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -517,10 +463,6 @@ fn view_launch_pad(
         product_name,
         "LaunchPad.viewLaunchPad",
     )
-}
-
-fn view_state(chain: &mut Chain, invoker: AccountAddress, contract: ContractAddress) -> StateView {
-    read_contract(chain, contract, invoker, (), "LaunchPad.viewState")
 }
 
 /// A helper function to invoke `CreatLaunchPad` function in launch pad contract to list an

@@ -1,9 +1,8 @@
 use concordium_cis2::{
-    IsTokenAmount, IsTokenId, TokenAmountU64, TokenIdU8, TokenIdVec, Transfer, TransferParams,
+    IsTokenAmount, IsTokenId, TokenAmountU64, TokenIdU8, TokenIdVec, TransferParams,
 };
 use concordium_std::{
-    to_bytes, Amount, CallContractError, ContractAddress, Deserial, EntrypointName, HasHost, Host,
-    ParseError, Read, Reject, SchemaType, Serial, Write,
+    Amount, CallContractError, ContractAddress, Deserial, EntrypointName, HasHost, Host, Serial,
 };
 
 use crate::{
@@ -11,10 +10,8 @@ use crate::{
     params::{AddLiquidityParams, GetExchangeParams, TokenInfo},
     response::ExchangeView,
     state::State,
-    ContractResult,
 };
 
-const SUPPORTS_ENTRYPOINT_NAME: EntrypointName = EntrypointName::new_unchecked("supports");
 const GET_EXCHANGE_ENTRYPOINT_NAME: EntrypointName = EntrypointName::new_unchecked("getExchange");
 const ADD_LIQUIDITY_ENTRYPOINT_NAME: EntrypointName = EntrypointName::new_unchecked("addLiquidity");
 const TRANSFER_ENTRYPOINT_NAME: EntrypointName = EntrypointName::new_unchecked("transfer");

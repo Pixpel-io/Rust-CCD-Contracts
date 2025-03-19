@@ -1,5 +1,3 @@
-use core::time;
-
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, Duration, HasChainMetadata,
@@ -302,11 +300,6 @@ impl LaunchPad {
     /// Checks if the soft cap is reached
     pub fn reached_soft_cap(&self) -> bool {
         self.collected >= self.soft_cap
-    }
-
-    /// Checks if the cliff duration has elapsed
-    pub fn is_cliff_elapsed(&self, ctx: &ReceiveContext) -> bool {
-        self.lock_up.cliff > ctx.metadata().block_time()
     }
 
     /// Gets the immutable reference to holder information
