@@ -104,6 +104,8 @@ impl State {
     }
 }
 
+type LockedRelease = (TokenAmount, TokenIdU64, Timestamp, bool);
+
 #[derive(Serial, DeserialWithState, Debug)]
 #[concordium(state_parameter = "S")]
 pub struct LaunchPad<S = StateApi> {
@@ -114,7 +116,7 @@ pub struct LaunchPad<S = StateApi> {
     pub timeperiod: TimePeriod,
     /// Property which holds the status if the launchpad
     /// is `Live`, `paused`, `canceled` or `completed`
-    pub status: LaunchPadStatus,
+    pub status: Status,
     /// Holds the details if the launchpad is paused
     pub pause: PauseDetails,
     /// Minimum limit of investment to reach before the
@@ -126,7 +128,8 @@ pub struct LaunchPad<S = StateApi> {
     /// Amount that have been collected sicne the start
     /// of presale
     pub collected: Amount,
-    pub locked_release: StateMap<u8, (TokenAmount, TokenIdU64, Timestamp, bool), S>,
+    /// Product owner's release cycles details of locked funds (LPTokens)
+    pub locked_release: StateMap<u8, LockedRelease, S>,
     /// List of investors with their associated invested
     /// amount in CCD
     pub holders: StateMap<AccountAddress, HolderInfo, S>,
@@ -145,7 +148,10 @@ pub struct LaunchPad<S = StateApi> {
     /// Keeps track if the raised funds are already
     /// withdrawn
     pub withdrawn: bool,
+    /// Remaining amount of token availbe for veting from the total
+    /// allocated tokens.
     pub available_tokens: TokenAmount,
+    /// Amount of tokens sold from the total allocated tokens.
     pub sold_tokens: TokenAmount,
 }
 
@@ -173,7 +179,7 @@ impl LaunchPad {
                 hard_cap: params.hard_cap,
                 vest_limits: params.vest_limits,
                 holders: state_builder.new_map(),
-                status: LaunchPadStatus::INREVIEW,
+                status: Status::INREVIEW,
                 pause: PauseDetails::default(),
                 collected: Amount::zero(),
                 locked_release: state_builder.new_map(),
@@ -225,14 +231,14 @@ impl LaunchPad {
     ///
     /// Returns `ture` if live
     pub fn is_live(&self) -> bool {
-        self.status == LaunchPadStatus::LIVE
+        self.status == Status::LIVE
     }
 
     /// Get whether the launch-pad is paused or not
     ///
     /// Returns `ture` if paused
     pub fn is_paused(&self) -> bool {
-        self.status == LaunchPadStatus::PAUSED
+        self.status == Status::PAUSED
     }
 
     /// Get whether the launch-pad is live of Paused
@@ -258,12 +264,12 @@ impl LaunchPad {
 
     /// Checks if the Launch pad is caneled
     pub fn is_canceled(&self) -> bool {
-        self.status == LaunchPadStatus::CANCELED
+        self.status == Status::CANCELED
     }
 
     /// Checks if the Launch pad is caneled
     pub fn is_completed(&self) -> bool {
-        self.status == LaunchPadStatus::COMPLETED
+        self.status == Status::COMPLETED
     }
 
     /// Returns the base price of allocated token for presale
@@ -389,7 +395,7 @@ pub struct Product {
 }
 
 #[derive(Serialize, SchemaType, Clone, Debug, PartialEq)]
-pub enum LaunchPadStatus {
+pub enum Status {
     /// When launchpas is approved and published for investments
     LIVE,
     /// When the launchpad is paused and not accepting investment
@@ -450,9 +456,6 @@ pub struct HolderInfo<S = StateApi> {
     pub tokens: TokenAmount,
     /// Total amount in CCD raised by the holder
     pub invested: Amount,
-    /// How many release cycles have been claimed
-    /// by the holder
-    pub cycles_rolled: u8,
     /// Release data regarding each cycle claimed
     /// by the holder
     pub release_data: Release<S>,

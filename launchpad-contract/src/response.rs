@@ -1,8 +1,6 @@
 use crate::{
-    params::TokenInfo,
     state::{
-        Admin, HolderInfo, LaunchPadState, LaunchPadStatus, LiquidityDetails, Lockup, Product,
-        VestingLimits,
+        Admin, HolderInfo, LaunchPadState, LiquidityDetails, Lockup, Product, Status, VestingLimits,
     },
     ProductName,
 };
@@ -12,8 +10,11 @@ use concordium_std::{
     AccountAddress, Amount, Deserial, SchemaType, Serial, Serialize, StateRef, Timestamp,
 };
 
+/// Alias for the list of all launch-pads view.
 pub type LaunchPadsView = Vec<LaunchPadView>;
 
+/// Defines the response to be returned to view the contract
+/// core State.
 #[derive(Serial, Deserial, SchemaType, Debug)]
 pub struct StateView {
     pub launch_pads: LaunchPadsView,
@@ -22,17 +23,21 @@ pub struct StateView {
     pub total_launch_pads: u32,
 }
 
+/// Defines the response to be returned to view all the launch
+/// pad present in the contract.
 #[derive(Serialize, SchemaType, Debug)]
 pub struct AllLaunchPads {
     pub total_launch_pads: u32,
     pub launch_pads: Vec<LaunchPadView>,
 }
 
+/// Defines the response to be returned to view the details
+/// regarding a launch-pad present in the contract.
 #[derive(Serialize, SchemaType, Debug)]
 pub struct LaunchPadView {
     pub product: ProductView,
     pub raised: Amount,
-    pub status: LaunchPadStatus,
+    pub status: Status,
     pub holders: Vec<(AccountAddress, HolderView)>,
     pub vest_limits: VestingLimits,
     pub soft_cap: Amount,
@@ -78,6 +83,8 @@ impl From<LaunchPadState<'_>> for LaunchPadView {
     }
 }
 
+/// Defines the view for the product, which contains product
+/// details for which the launch pad is created.
 #[derive(Serialize, SchemaType, Debug)]
 pub struct ProductView {
     pub name: ProductName,
@@ -97,6 +104,10 @@ impl From<Product> for ProductView {
     }
 }
 
+/// Defines the view for a single holder, who has invested into
+/// the launch pad.
+///
+/// It contains details regarding the holder.
 #[derive(Serialize, SchemaType, Debug)]
 pub struct HolderView {
     pub tokens: TokenAmount,
@@ -126,6 +137,8 @@ impl From<StateRef<'_, HolderInfo>> for HolderView {
     }
 }
 
+/// Wrapper for unlocked release cycles to implement the schema
+/// for schema deserialization.
 #[derive(Serialize)]
 pub struct UnlockedWrapper(pub (TokenAmount, Timestamp, bool));
 
@@ -157,6 +170,8 @@ impl From<(TokenAmount, Timestamp, bool)> for UnlockedWrapper {
     }
 }
 
+/// Wrapper for locked release cycles to implement the schema
+/// for schema deserialization.
 #[derive(Serialize)]
 pub struct LockedWrapper(pub (TokenAmount, TokenIdU64, Timestamp, bool));
 
@@ -187,14 +202,4 @@ impl From<(TokenAmount, TokenIdU64, Timestamp, bool)> for LockedWrapper {
     fn from(value: (TokenAmount, TokenIdU64, Timestamp, bool)) -> Self {
         Self(value)
     }
-}
-
-#[derive(Serialize, SchemaType, Debug)]
-pub struct ExchangeView {
-    pub token: TokenInfo,
-    pub token_balance: TokenAmount,
-    pub ccd_balance: TokenAmount,
-    pub lp_token_id: TokenIdU64,
-    pub lp_tokens_supply: TokenAmount,
-    pub lp_tokens_holder_balance: TokenAmount,
 }

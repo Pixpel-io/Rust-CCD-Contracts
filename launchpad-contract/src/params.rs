@@ -2,10 +2,11 @@ use crate::{
     state::{Admin, LiquidityDetails, Product, TimePeriod, VestingLimits, DAYS},
     ProductName,
 };
-use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdVec};
-use concordium_std::*;
+use concordium_cis2::TokenAmountU64 as TokenAmount;
+use concordium_std::{Amount, Deserial, Duration, SchemaType, Serial, Serialize, Timestamp};
 
 pub type Months = u64;
+
 /// Contract initialization parameters to be passed at the time
 /// of contract init.
 ///
@@ -97,38 +98,33 @@ pub struct VestParams {
     pub token_amount: TokenAmount,
 }
 
-#[derive(Serial, Deserial, SchemaType)]
-pub struct AddLiquidityParams {
-    pub token: TokenInfo,
-    pub token_amount: TokenAmount,
-}
-
-#[derive(Serial, Deserial, SchemaType, Clone, Debug)]
-pub struct TokenInfo {
-    pub id: TokenIdVec,
-    pub address: ContractAddress,
-}
-
-#[derive(Serial, Deserial, SchemaType)]
-pub struct GetExchangeParams {
-    pub holder: Address,
-    pub token: TokenInfo,
-}
-
+/// Defines who is claiming the locked tokens, either
+/// owner or holder, along with the cycle number.
 #[derive(Serial, Deserial, SchemaType)]
 pub enum Claimer {
+    /// Product owner of the launch pad.
     OWNER(u8),
+    /// Holder of a launch pad (investor/player).
     HOLDER(u8),
 }
 
+/// Parameters to be passed while invoking `ClaimLockedFunds` to claim the
+/// locked tokens.
 #[derive(Serial, Deserial, SchemaType)]
 pub struct ClaimLockedParams {
+    /// Indicates who is the claimer, owner/holder, along with
+    /// the number of cycle to be claimed.
     pub claimer: Claimer,
+    /// Name of the product for launch pad identification.
     pub product_name: ProductName,
 }
 
+/// Parameters to be passed while invoking `ClaimTokens` to claim the
+/// tokens related to a specific holder.
 #[derive(Serial, Deserial, SchemaType)]
 pub struct ClaimUnLockedParams {
+    /// Serial number of cycle to be claimed.
     pub cycle: u8,
+    /// Name of the product for launch pad identification.
     pub product_name: ProductName,
 }

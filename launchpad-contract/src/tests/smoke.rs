@@ -1,10 +1,10 @@
 use crate::{
+    dex::{AddLiquidityParams, ExchangeView, GetExchangeParams, TokenInfo},
     errors::Error,
     params::{
-        AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer,
-        CreateParams, GetExchangeParams, LockupDetails, TokenInfo, VestParams,
+        ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams,
+        LockupDetails, VestParams,
     },
-    response::ExchangeView,
     state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
     tests::{
         claim_locked_tokens, claim_tokens, get_lp_token_balance, get_token_balance, invest,
