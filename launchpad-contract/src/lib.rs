@@ -547,7 +547,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished. As well as the cliff duration has elapsed
-    ensure!(launch_pad.is_canceled(), LaunchPadError::Canceled);
+    ensure!(!launch_pad.is_canceled(), LaunchPadError::Canceled);
     ensure!(launch_pad.is_finished(ctx), LaunchPadError::Vesting);
 
     if let Some(cycle_details) = launch_pad
@@ -587,6 +587,8 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
                 data: AdditionalData::empty(),
             },
         )?;
+
+        return Ok(());
     }
 
     // Return early with error if the cycle number supplied in
@@ -887,7 +889,7 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
             if let Some(cycle_details) = launch_pad.locked_release.get(&cycle) {
                 let (token_amount, lp_token_id, timestamp, claimed) = *cycle_details;
 
-                ensure!(claimed, LaunchPadError::Claimed);
+                ensure!(!claimed, LaunchPadError::Claimed);
                 ensure!(
                     ctx.metadata().block_time() >= timestamp,
                     LaunchPadError::NotElapsed
@@ -915,7 +917,7 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
 
                 ensure!(!claimed, LaunchPadError::Claimed);
                 ensure!(
-                    ctx.metadata().block_time() <= timestamp,
+                    ctx.metadata().block_time() >= timestamp,
                     LaunchPadError::NotElapsed
                 );
 

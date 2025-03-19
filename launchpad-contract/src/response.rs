@@ -44,6 +44,7 @@ pub struct LaunchPadView {
     pub vest_limits: VestingLimits,
     pub soft_cap: Amount,
     pub hard_cap: Option<Amount>,
+    pub locked_release: Vec<(u8, LockedWrapper)>,
     pub allocation_paid: bool,
     pub liquidity_paid: bool,
     pub withdrawn: bool,
@@ -70,6 +71,11 @@ impl From<LaunchPadState<'_>> for LaunchPadView {
             vest_limits: value.vest_limits.clone(),
             soft_cap: value.soft_cap,
             hard_cap: value.hard_cap,
+            locked_release: value
+                .locked_release
+                .iter()
+                .map(|(count, details)| (*count, (*details).into()))
+                .collect(),
             allocation_paid: value.allocation_paid,
             liquidity_paid: value.liquidity_paid,
             withdrawn: value.withdrawn,
@@ -144,7 +150,11 @@ impl SchemaType for UnlockedWrapper {
 
 impl concordium_std::fmt::Debug for UnlockedWrapper {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "({} tokens, {} millis, {})", self.0.0.0, self.0.1.millis, self.0.2)   
+        write!(
+            f,
+            "({} tokens, {} millis, {})",
+            self.0 .0 .0, self.0 .1.millis, self.0 .2
+        )
     }
 }
 
@@ -159,7 +169,11 @@ pub struct LockedWrapper(pub (TokenAmount, TokenIdU64, Timestamp, bool));
 
 impl concordium_std::fmt::Debug for LockedWrapper {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "({} tokens, {} token_id, {} millis, {})", self.0.0.0, self.0.1.0, self.0.2.millis, self.0.3)   
+        write!(
+            f,
+            "({} tokens, {} token_id, {} millis, {})",
+            self.0 .0 .0, self.0 .1 .0, self.0 .2.millis, self.0 .3
+        )
     }
 }
 

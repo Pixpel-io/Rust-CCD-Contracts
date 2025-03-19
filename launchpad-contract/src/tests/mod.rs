@@ -1,14 +1,11 @@
 use crate::{
     errors::LaunchPadError,
-    params::{ApprovalParams, CreateParams, VestParams},
+    params::{ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, CreateParams, VestParams},
     response::{LaunchPadView, StateView},
     state::Admin,
 };
 use concordium_cis2::{
-    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, OperatorOfQuery,
-    OperatorOfQueryParams, OperatorOfQueryResponse, OperatorUpdate, Receiver,
-    TokenAmountU64 as TokenAmount, TokenIdU8 as TokenID, Transfer, TransferParams, UpdateOperator,
-    UpdateOperatorParams,
+    AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, OperatorOfQuery, OperatorOfQueryParams, OperatorOfQueryResponse, OperatorUpdate, Receiver, TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, Transfer, TransferParams, UpdateOperator, UpdateOperatorParams
 };
 use concordium_smart_contract_testing::{
     module_load_v1, Account, AccountKeys, Chain, Energy, InitContractPayload, Signer,
@@ -286,43 +283,24 @@ pub fn mint_token(
 pub fn get_token_balance(
     chain: &mut Chain,
     invoker: AccountAddress,
-    balance_of: Address,
+    balance_of: &[(Address, TokenID)],
     cis2_contract: ContractAddress,
-    token_id: TokenID,
 ) -> BalanceOfQueryResponse<TokenAmount> {
-    let balance_of_params: BalanceOfQueryParams<_> = BalanceOfQueryParams {
-        queries: vec![BalanceOfQuery {
-            token_id,
-            address: balance_of,
-        }],
-    };
+    let queries: Vec<_> = balance_of
+        .iter()
+        .map(|(address, token_id)| BalanceOfQuery {
+            token_id: *token_id,
+            address: *address,
+        })
+        .collect::<Vec<_>>();
 
     read_contract(
         chain,
         cis2_contract,
         invoker,
-        balance_of_params,
+        BalanceOfQueryParams { queries },
         "cis2_multi.balanceOf",
     )
-    // let payload = UpdateContractPayload {
-    //     amount: Amount::zero(),
-    //     receive_name: OwnedReceiveName::new_unchecked("cis2_multi.balanceOf".to_string()),
-    //     address: cis2_contract,
-    //     message: OwnedParameter::from_serial(&balance_of_params).expect("BalanceOf params"),
-    // };
-
-    // let invoke = chain
-    //     .contract_invoke(
-    //         invoker,
-    //         Address::Account(invoker),
-    //         Energy::from(10000),
-    //         payload,
-    //     )
-    //     .expect("[Error] Balance_Of query Invocation failed");
-
-    // invoke
-    //     .parse_return_value()
-    //     .expect("[Error] Unable to deserialize response Balance_Of quary")
 }
 
 /// A helper function which invokes `cis2_multi` contract to update the operator of a certain
@@ -381,6 +359,65 @@ fn ensure_is_operator_of(
     .expect("[Error] While invoking ensure_is_operator");
 
     response.0[0]
+}
+
+/// A helper function which invokes `cis2_multi` contract to get the balance of specific tokens minted
+/// for a specifi account.
+///
+/// This is useful for integration testing
+pub fn get_lp_token_balance(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    balance_of: &[(Address, TokenIdU64)],
+    dex_contract: ContractAddress,
+) -> BalanceOfQueryResponse<TokenAmount> {
+    let queries: Vec<_> = balance_of
+        .iter()
+        .map(|(address, token_id)| BalanceOfQuery {
+            token_id: *token_id,
+            address: *address,
+        })
+        .collect::<Vec<_>>();
+
+    read_contract(
+        chain,
+        dex_contract,
+        invoker,
+        BalanceOfQueryParams { queries },
+        "pixpel_swap.balanceOf",
+    )
+}
+
+fn claim_locked_tokens(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    params: ClaimLockedParams,
+    contract: ContractAddress,
+) -> Result<(), LaunchPadError> {
+    update_contract(
+        chain,
+        contract,
+        invoker,
+        params,
+        None,
+        "LaunchPad.WithDrawLockedFunds",
+    )
+}
+
+fn claim_tokens(
+    chain: &mut Chain,
+    invoker: AccountAddress,
+    params: ClaimUnLockedParams,
+    contract: ContractAddress,
+) -> Result<(), LaunchPadError> {
+    update_contract(
+        chain,
+        contract,
+        invoker,
+        params,
+        None,
+        "LaunchPad.ClaimTokens",
+    )
 }
 
 fn withdraw_raised_funds(
