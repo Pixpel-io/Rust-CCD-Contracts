@@ -1,15 +1,20 @@
 use crate::{
     errors::Error,
     params::{
-        AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams, GetExchangeParams, LockupDetails, TokenInfo, VestParams
+        AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer,
+        CreateParams, GetExchangeParams, LockupDetails, TokenInfo, VestParams,
     },
     response::ExchangeView,
     state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
-    tests::{claim_locked_tokens, claim_tokens, get_lp_token_balance, get_token_balance, invest, withdraw_raised_funds, HOLDERS},
+    tests::{
+        claim_locked_tokens, claim_tokens, get_lp_token_balance, get_token_balance, invest,
+        withdraw_raised_funds, HOLDERS,
+    },
     CYCLE_DURATION,
 };
 use concordium_cis2::{
-    OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdVec, UpdateOperator, UpdateOperatorParams
+    OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdVec, UpdateOperator,
+    UpdateOperatorParams,
 };
 
 use concordium_std::{Address, Amount, Duration, Timestamp};
@@ -186,8 +191,8 @@ fn launch_pad_smoke() -> Result<(), Error> {
     }
 
     for i in 1..=3 {
-        let _ = chain.tick_block_time(Duration::from_millis(3500 + 4*i*CYCLE_DURATION));
-    
+        let _ = chain.tick_block_time(Duration::from_millis(3500 + 4 * i * CYCLE_DURATION));
+
         claim_locked_tokens(
             &mut chain,
             OWNER,
@@ -197,7 +202,7 @@ fn launch_pad_smoke() -> Result<(), Error> {
             },
             lp_contract,
         )?;
-    
+
         println!(
             "{:?}",
             get_lp_token_balance(

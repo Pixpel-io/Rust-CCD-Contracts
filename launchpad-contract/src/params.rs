@@ -1,11 +1,14 @@
-use crate::{state::{Admin, LiquidityDetails, Product, TimePeriod, VestingLimits, DAYS}, ProductName};
+use crate::{
+    state::{Admin, LiquidityDetails, Product, TimePeriod, VestingLimits, DAYS},
+    ProductName,
+};
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdVec};
 use concordium_std::*;
 
 pub type Months = u64;
 /// Contract initialization parameters to be passed at the time
 /// of contract init.
-/// 
+///
 /// Launch-pad contract is initialized with the provided admin
 /// details.
 #[derive(Serialize, SchemaType)]
@@ -32,7 +35,7 @@ pub struct CreateParams {
     /// Lock up information for vesting releases
     pub lockup_details: LockupDetails,
     /// Token Liquidity information to lock the funds
-    pub liquidity_details: LiquidityDetails
+    pub liquidity_details: LiquidityDetails,
 }
 
 impl CreateParams {
@@ -54,7 +57,7 @@ impl CreateParams {
 pub struct LockupDetails {
     /// Cliff duration until vesting starts
     pub cliff: Months,
-    /// Vesting cycles based on months for linear vesting 
+    /// Vesting cycles based on months for linear vesting
     pub release_cycles: Months,
 }
 
@@ -66,11 +69,11 @@ pub struct ApprovalParams {
     /// for approval
     pub product_name: ProductName,
     /// A boolean if `true` means approved, if `false`
-    /// mean rejected 
+    /// mean rejected
     pub approve: bool,
 }
 
-/// Parameters to be passed while invoking `LivePause` to pause or resume 
+/// Parameters to be passed while invoking `LivePause` to pause or resume
 /// launch-pad vesting
 #[derive(Serialize, SchemaType)]
 pub struct LivePauseParams {
@@ -83,7 +86,7 @@ pub struct LivePauseParams {
     pub to_pause: bool,
 }
 
-/// Parameters to be passed while invoking `Vest` to invest on a launch pad 
+/// Parameters to be passed while invoking `Vest` to invest on a launch pad
 #[derive(Serialize, SchemaType)]
 pub struct VestParams {
     /// Product name to identify launch pad in contract
@@ -115,67 +118,17 @@ pub struct GetExchangeParams {
 #[derive(Serial, Deserial, SchemaType)]
 pub enum Claimer {
     OWNER(u8),
-    HOLDER(u8)
+    HOLDER(u8),
 }
 
 #[derive(Serial, Deserial, SchemaType)]
 pub struct ClaimLockedParams {
     pub claimer: Claimer,
-    pub product_name: ProductName
+    pub product_name: ProductName,
 }
 
 #[derive(Serial, Deserial, SchemaType)]
 pub struct ClaimUnLockedParams {
     pub cycle: u8,
-    pub product_name: ProductName
+    pub product_name: ProductName,
 }
-
-// #[derive(Serial, Deserial, SchemaType)]
-// pub struct ClaimTokenParams {
-//     pub id: TokenID,
-//     pub address: ContractAddress,
-//     pub launchpad_id: u64,
-//     pub epoch_cycle: u8,
-// }
-
-// #[derive(Serial, Deserial, SchemaType)]
-// pub struct TokenParam {
-//     pub id: TokenID,
-//     pub address: ContractAddress,
-//     pub token_amount: TokenAmount,
-// }
-
-// #[derive(Serialize, SchemaType)]
-// pub struct LaunchpadParam {
-//     pub start_time: Timestamp,
-//     pub end_time: Timestamp,
-//     pub live: bool,
-//     pub soft_cap: u64,
-//     pub hard_cap: u64,
-//     pub minimum_invest: u64,
-//     pub maximum_invest: u64,
-//     pub cliff_duration: u64,
-//     pub token_param: TokenParam,
-//     pub token_release_data: BTreeMap<ReleaseCycles, ReleaseData>,
-//     pub cis2_price: u32,
-// }
-
-
-
-// #[derive(Serialize, SchemaType, Clone)]
-// pub struct TokenInfo {
-//     pub id: TokenID,
-//     pub address: ContractAddress,
-// }
-// #[derive(Serialize, SchemaType, Clone)]
-// pub struct CancelParam {
-//     pub launchpad_id: LaunchPadID,
-//     pub token: TokenInfo,
-// }
-
-// #[derive(Serialize, SchemaType, Clone)]
-// pub struct WithdrawParam {
-//     pub launchpad_id: LaunchPadID,
-//     pub token: TokenInfo,
-//     pub remaining_cis2_amount: TokenAmount,
-// }

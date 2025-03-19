@@ -87,10 +87,7 @@ impl State {
     /// its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
-    pub fn get_launchpad(
-        &self,
-        product_name: String,
-    ) -> Result<LaunchPadState<'_>, Error> {
+    pub fn get_launchpad(&self, product_name: String) -> Result<LaunchPadState<'_>, Error> {
         if let Some(launchpad) = self.launchpads.get(&product_name) {
             return Ok(launchpad);
         }
@@ -98,10 +95,7 @@ impl State {
         Err(Error::NotFound)
     }
 
-    pub fn my_launch_pads(
-        &self,
-        holder: AccountAddress,
-    ) -> Result<Vec<ProductName>, Error> {
+    pub fn my_launch_pads(&self, holder: AccountAddress) -> Result<Vec<ProductName>, Error> {
         if let Some(ids) = self.investors.get(&holder) {
             return Ok(ids.clone());
         }

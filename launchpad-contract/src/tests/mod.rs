@@ -6,7 +6,7 @@ use crate::{
 };
 use concordium_cis2::{
     AdditionalData, BalanceOfQuery, BalanceOfQueryParams, BalanceOfQueryResponse, Receiver,
-    TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, Transfer, TransferParams
+    TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, Transfer, TransferParams,
 };
 use concordium_smart_contract_testing::{
     module_load_v1, Account, AccountKeys, Chain, Energy, InitContractPayload, Signer,

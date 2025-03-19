@@ -555,10 +555,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
         // Ensuring that this cycle is not already claimed and cycle
         // duration of 1 month is passed since the last cycle.
         ensure!(!claimed, Error::Claimed);
-        ensure!(
-            ctx.metadata().block_time() >= timestamp,
-            Error::NotElapsed
-        );
+        ensure!(ctx.metadata().block_time() >= timestamp, Error::NotElapsed);
 
         let cis2_contract = launch_pad.get_cis2_contract();
         let token_id = launch_pad.get_product_token_id();
@@ -611,10 +608,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
     let launch_pad = host.state().get_launchpad(product_name.clone())?;
 
     // Make sure that the transaction is authorized
-    ensure!(
-        owner == launch_pad.get_product_owner(),
-        Error::UnAuthorized
-    );
+    ensure!(owner == launch_pad.get_product_owner(), Error::UnAuthorized);
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished.
@@ -626,10 +620,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
     // the product has acheived soft cap and the funds are not
     // already raised
     if !launch_pad.withdrawn && launch_pad.reached_soft_cap() {
-        ensure!(
-            launch_pad.reached_soft_cap(),
-            Error::SoftNotReached
-        );
+        ensure!(launch_pad.reached_soft_cap(), Error::SoftNotReached);
 
         // Calculating the amount of funds in CCD to be locked
         // in liquidity according to the percentage provided by
@@ -884,10 +875,7 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
                 let (token_amount, lp_token_id, timestamp, claimed) = *cycle_details;
 
                 ensure!(!claimed, Error::Claimed);
-                ensure!(
-                    ctx.metadata().block_time() >= timestamp,
-                    Error::NotElapsed
-                );
+                ensure!(ctx.metadata().block_time() >= timestamp, Error::NotElapsed);
 
                 host.state_mut()
                     .get_mut_launchpad(claim_params.product_name)?
@@ -910,10 +898,7 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
                 let (token_amount, lp_token_id, timestamp, claimed) = *locked_cycle_details;
 
                 ensure!(!claimed, Error::Claimed);
-                ensure!(
-                    ctx.metadata().block_time() >= timestamp,
-                    Error::NotElapsed
-                );
+                ensure!(ctx.metadata().block_time() >= timestamp, Error::NotElapsed);
 
                 host.state_mut()
                     .get_mut_launchpad(claim_params.product_name)?
@@ -980,10 +965,7 @@ fn cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     let launch_pad = host.state().get_launchpad(product_name.clone())?;
 
     // Make sure that the transaction is authorized
-    ensure!(
-        owner == launch_pad.get_product_owner(),
-        Error::UnAuthorized
-    );
+    ensure!(owner == launch_pad.get_product_owner(), Error::UnAuthorized);
 
     // Make sure that the launch pad is not already canceled, did not
     //reach the soft cap, launch pad is not completed.
