@@ -1,6 +1,4 @@
 [workspace]
 resolver = "2"
-members = [
-    "launchpad-contract",
-    "nft-auction",
-]
+
+members = ["launchpad-contract", "nft-auction"]
