@@ -1,18 +1,23 @@
 use crate::{
-    errors::LaunchPadError,
+    dex::{AddLiquidityParams, ExchangeView, GetExchangeParams, TokenInfo},
+    errors::Error,
     params::{
-        AddLiquidityParams, ApprovalParams, CreateParams, GetExchangeParams, LockupDetails,
-        TokenInfo, VestParams,
+        ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams,
+        LockupDetails, VestParams,
     },
-    response::ExchangeView,
     state::{LiquidityDetails, Product, TimePeriod, VestingLimits},
-    tests::{invest, view_state, HOLDERS},
+    tests::{
+        claim_locked_tokens, claim_tokens, get_lp_token_balance, get_token_balance, invest,
+        withdraw_raised_funds, HOLDERS,
+    },
+    CYCLE_DURATION,
 };
 use concordium_cis2::{
-    OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdVec, UpdateOperator, UpdateOperatorParams,
+    OperatorUpdate, TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdVec, UpdateOperator,
+    UpdateOperatorParams,
 };
 
-use concordium_std::{Address, Amount, Timestamp};
+use concordium_std::{Address, Amount, Duration, Timestamp};
 
 use super::{
     approve_launch_pad, create_launch_pad, deposit_tokens, initialize_chain_and_contracts,
@@ -21,8 +26,8 @@ use super::{
 };
 
 #[test]
-fn launch_pad_smoke() -> Result<(), LaunchPadError> {
-    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+fn launch_pad_smoke() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, dex_contract) = initialize_chain_and_contracts();
 
     mint_token(
         &mut chain,
@@ -115,16 +120,110 @@ fn launch_pad_smoke() -> Result<(), LaunchPadError> {
         Amount::from_ccd(5 * 2200),
         lp_contract,
     )?;
-    
-    let response = view_launch_pad(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract);
 
-    println!("{:#?}", response);
+    let _ = chain.tick_block_time(Duration::from_millis(3500));
+
+    withdraw_raised_funds(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract)?;
+
+    println!(
+        "{:?}",
+        chain
+            .account_balance(OWNER)
+            .and_then(|balance| Some(balance.total.micro_ccd / 1000000))
+    );
+
+    for i in 1..=3 {
+        let _ = chain.tick_block_time(Duration::from_millis(3500 + i * CYCLE_DURATION));
+
+        for holder in HOLDERS.iter() {
+            claim_tokens(
+                &mut chain,
+                *holder,
+                ClaimUnLockedParams {
+                    cycle: i as u8,
+                    product_name: PRODUCT_NAME.to_string(),
+                },
+                lp_contract,
+            )?;
+        }
+
+        println!(
+            "{:?}",
+            get_token_balance(
+                &mut chain,
+                OWNER,
+                &[
+                    (HOLDERS[0].into(), OWNER_TOKEN_ID),
+                    (HOLDERS[1].into(), OWNER_TOKEN_ID),
+                    (HOLDERS[2].into(), OWNER_TOKEN_ID),
+                ],
+                cis2_contract,
+            )
+        );
+    }
+
+    for i in 1..=3 {
+        for holder in HOLDERS.iter() {
+            claim_locked_tokens(
+                &mut chain,
+                *holder,
+                ClaimLockedParams {
+                    claimer: Claimer::HOLDER(i),
+                    product_name: PRODUCT_NAME.to_string(),
+                },
+                lp_contract,
+            )?;
+        }
+
+        println!(
+            "{:?}",
+            get_lp_token_balance(
+                &mut chain,
+                OWNER,
+                &[
+                    (HOLDERS[0].into(), TokenIdU64(1)),
+                    (HOLDERS[1].into(), TokenIdU64(1)),
+                    (HOLDERS[2].into(), TokenIdU64(1)),
+                ],
+                dex_contract,
+            )
+        );
+    }
+
+    for i in 1..=3 {
+        let _ = chain.tick_block_time(Duration::from_millis(3500 + 4 * i * CYCLE_DURATION));
+
+        claim_locked_tokens(
+            &mut chain,
+            OWNER,
+            ClaimLockedParams {
+                claimer: Claimer::OWNER(i as u8),
+                product_name: PRODUCT_NAME.to_string(),
+            },
+            lp_contract,
+        )?;
+
+        println!(
+            "{:?}",
+            get_lp_token_balance(
+                &mut chain,
+                OWNER,
+                &[(OWNER.into(), TokenIdU64(1))],
+                dex_contract,
+            )
+        );
+    }
+
+    println!(
+        "{:#?}",
+        view_launch_pad(&mut chain, OWNER, PRODUCT_NAME.to_string(), lp_contract)
+    );
 
     Ok(())
 }
 
 #[test]
-fn dex_liquid_smoke() -> Result<(), LaunchPadError> {
+fn dex_liquid_smoke() -> Result<(), Error> {
     let (mut chain, _, _, cis2_addr, dex_contract) = initialize_chain_and_contracts();
 
     mint_token(

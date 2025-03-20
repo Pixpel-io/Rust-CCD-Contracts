@@ -6,7 +6,7 @@ use concordium_std::{schema, AccountAddress, Amount, Serialize, Timestamp};
 use crate::state::{TimePeriod, VestingLimits};
 
 /// Tagged Launch-pad events to be serialized for the event logging.
-/// 
+///
 /// Each event represent a major state change in contract or launch-pad
 #[derive(Serialize)]
 pub enum Event {
@@ -23,7 +23,7 @@ pub enum Event {
     VESTINGSTARTED(VestEvent),
     /// Event to be logged when a launch pad finishes vesting and
     /// enters the cliff period
-    CLIFFSTARTED(CliffEvent)
+    CLIFFSTARTED(CliffEvent),
 }
 
 // Implementing a custom schemaType for the `Event` struct.
@@ -92,7 +92,7 @@ pub struct CreateLaunchPadEvent {
     pub launchpad_name: String,
     pub owner: AccountAddress,
     pub allocated_tokens: TokenAmount,
-    pub base_price: Amount
+    pub base_price: Amount,
 }
 
 #[derive(Serialize)]
@@ -110,12 +110,12 @@ pub struct CliffEvent {
     pub launchpad_id: u64,
     pub launchpad_name: String,
     pub from: Timestamp,
-    pub to: Timestamp
+    pub to: Timestamp,
 }
 
 #[derive(Serialize)]
 pub struct VestEvent {
     pub launchpad_name: String,
     pub vesting_time: TimePeriod,
-    pub vesting_limits: VestingLimits
+    pub vesting_limits: VestingLimits,
 }

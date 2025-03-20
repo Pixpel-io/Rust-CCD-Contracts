@@ -1,5 +1,3 @@
-use core::time;
-
 use concordium_cis2::{TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID};
 use concordium_std::{
     AccountAddress, Amount, ContractAddress, DeserialWithState, Duration, HasChainMetadata,
@@ -8,7 +6,7 @@ use concordium_std::{
 };
 
 use crate::{
-    errors::LaunchPadError,
+    errors::Error,
     params::{CreateParams, Months},
     ProductName,
 };
@@ -77,40 +75,36 @@ impl State {
     pub fn get_mut_launchpad(
         &mut self,
         product_name: String,
-    ) -> Result<LaunchPadStateMut<'_>, LaunchPadError> {
+    ) -> Result<LaunchPadStateMut<'_>, Error> {
         if let Some(launchpad) = self.launchpads.get_mut(&product_name) {
             return Ok(launchpad);
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 
     /// Gets the immutable reference to `LaunchPad` by product name with
     /// its associative ID
     ///
     /// Returns `LaunchPadError` if the LaunchPad does not exist.
-    pub fn get_launchpad(
-        &self,
-        product_name: String,
-    ) -> Result<LaunchPadState<'_>, LaunchPadError> {
+    pub fn get_launchpad(&self, product_name: String) -> Result<LaunchPadState<'_>, Error> {
         if let Some(launchpad) = self.launchpads.get(&product_name) {
             return Ok(launchpad);
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 
-    pub fn my_launch_pads(
-        &self,
-        holder: AccountAddress,
-    ) -> Result<Vec<ProductName>, LaunchPadError> {
+    pub fn my_launch_pads(&self, holder: AccountAddress) -> Result<Vec<ProductName>, Error> {
         if let Some(ids) = self.investors.get(&holder) {
             return Ok(ids.clone());
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 }
+
+type LockedRelease = (TokenAmount, TokenIdU64, Timestamp, bool);
 
 #[derive(Serial, DeserialWithState, Debug)]
 #[concordium(state_parameter = "S")]
@@ -122,7 +116,7 @@ pub struct LaunchPad<S = StateApi> {
     pub timeperiod: TimePeriod,
     /// Property which holds the status if the launchpad
     /// is `Live`, `paused`, `canceled` or `completed`
-    pub status: LaunchPadStatus,
+    pub status: Status,
     /// Holds the details if the launchpad is paused
     pub pause: PauseDetails,
     /// Minimum limit of investment to reach before the
@@ -134,7 +128,8 @@ pub struct LaunchPad<S = StateApi> {
     /// Amount that have been collected sicne the start
     /// of presale
     pub collected: Amount,
-    pub locked_release: StateMap<u8, (TokenAmount, TokenIdU64, Timestamp, bool), S>,
+    /// Product owner's release cycles details of locked funds (LPTokens)
+    pub locked_release: StateMap<u8, LockedRelease, S>,
     /// List of investors with their associated invested
     /// amount in CCD
     pub holders: StateMap<AccountAddress, HolderInfo, S>,
@@ -153,7 +148,10 @@ pub struct LaunchPad<S = StateApi> {
     /// Keeps track if the raised funds are already
     /// withdrawn
     pub withdrawn: bool,
+    /// Remaining amount of token availbe for veting from the total
+    /// allocated tokens.
     pub available_tokens: TokenAmount,
+    /// Amount of tokens sold from the total allocated tokens.
     pub sold_tokens: TokenAmount,
 }
 
@@ -181,7 +179,7 @@ impl LaunchPad {
                 hard_cap: params.hard_cap,
                 vest_limits: params.vest_limits,
                 holders: state_builder.new_map(),
-                status: LaunchPadStatus::INREVIEW,
+                status: Status::INREVIEW,
                 pause: PauseDetails::default(),
                 collected: Amount::zero(),
                 locked_release: state_builder.new_map(),
@@ -233,14 +231,14 @@ impl LaunchPad {
     ///
     /// Returns `ture` if live
     pub fn is_live(&self) -> bool {
-        self.status == LaunchPadStatus::LIVE
+        self.status == Status::LIVE
     }
 
     /// Get whether the launch-pad is paused or not
     ///
     /// Returns `ture` if paused
     pub fn is_paused(&self) -> bool {
-        self.status == LaunchPadStatus::PAUSED
+        self.status == Status::PAUSED
     }
 
     /// Get whether the launch-pad is live of Paused
@@ -266,12 +264,12 @@ impl LaunchPad {
 
     /// Checks if the Launch pad is caneled
     pub fn is_canceled(&self) -> bool {
-        self.status == LaunchPadStatus::CANCELED
+        self.status == Status::CANCELED
     }
 
     /// Checks if the Launch pad is caneled
     pub fn is_completed(&self) -> bool {
-        self.status == LaunchPadStatus::COMPLETED
+        self.status == Status::COMPLETED
     }
 
     /// Returns the base price of allocated token for presale
@@ -304,11 +302,6 @@ impl LaunchPad {
         self.collected >= self.soft_cap
     }
 
-    /// Checks if the cliff duration has elapsed
-    pub fn is_cliff_elapsed(&self, ctx: &ReceiveContext) -> bool {
-        self.lock_up.cliff > ctx.metadata().block_time()
-    }
-
     /// Gets the immutable reference to holder information
     /// releated to the launch pad.
     ///
@@ -316,12 +309,12 @@ impl LaunchPad {
     pub fn get_holder_info(
         &self,
         holder: AccountAddress,
-    ) -> Result<StateRef<'_, HolderInfo>, LaunchPadError> {
+    ) -> Result<StateRef<'_, HolderInfo>, Error> {
         if let Some(info) = self.holders.get(&holder) {
             return Ok(info);
         }
 
-        Err(LaunchPadError::NotFound)
+        Err(Error::NotFound)
     }
 
     /// Updates the unlocked release data related to a specific holder in the
@@ -402,7 +395,7 @@ pub struct Product {
 }
 
 #[derive(Serialize, SchemaType, Clone, Debug, PartialEq)]
-pub enum LaunchPadStatus {
+pub enum Status {
     /// When launchpas is approved and published for investments
     LIVE,
     /// When the launchpad is paused and not accepting investment
@@ -463,9 +456,6 @@ pub struct HolderInfo<S = StateApi> {
     pub tokens: TokenAmount,
     /// Total amount in CCD raised by the holder
     pub invested: Amount,
-    /// How many release cycles have been claimed
-    /// by the holder
-    pub cycles_rolled: u8,
     /// Release data regarding each cycle claimed
     /// by the holder
     pub release_data: Release<S>,
@@ -581,9 +571,9 @@ impl TimePeriod {
     /// valid realistic range
     ///
     /// Returns `Ok()` or else `VestingError`
-    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), LaunchPadError> {
+    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), Error> {
         if self.start >= self.end && self.end <= current {
-            return Err(LaunchPadError::InCorrect);
+            return Err(Error::InCorrect);
         }
         Ok(())
     }

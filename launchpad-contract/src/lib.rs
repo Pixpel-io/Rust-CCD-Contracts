@@ -1,8 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 use concordium_cis2::{
-    AdditionalData, Cis2Client, Cis2ClientError, OnReceivingCis2Params, OperatorUpdate,
-    TokenAmountU64 as TokenAmount, TokenIdU64, TokenIdU8 as TokenID, TokenIdVec, Transfer,
-    TransferParams, UpdateOperator, UpdateOperatorParams,
+    AdditionalData, Cis2Client, OnReceivingCis2Params, TokenAmountU64 as TokenAmount, TokenIdU64,
+    TokenIdU8 as TokenID, TokenIdVec, Transfer, TransferParams,
 };
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
@@ -11,28 +10,29 @@ use concordium_std::{
     InitContext, InitResult, Logger, ReceiveContext, Reject, Serial, StateBuilder, UnwrapAbort,
     Write, *,
 };
-use errors::LaunchPadError;
+use dex::{DexClient, GetExchangeParams, TokenInfo};
+use errors::Error;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
+use helper::update_operator_of;
 use params::{
-    AddLiquidityParams, ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer,
-    CreateParams, GetExchangeParams, InitParams, LivePauseParams, TokenInfo, VestParams,
+    ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams, InitParams,
+    LivePauseParams, VestParams,
 };
-use response::{AllLaunchPads, ExchangeView, LaunchPadView, LaunchPadsView, StateView};
-use state::{HolderInfo, LaunchPad, LaunchPadStatus, LiquidityDetails, Release, State, TimePeriod};
-// use types::ContractResult;
+use response::{AllLaunchPads, LaunchPadView, LaunchPadsView, StateView};
+use state::{HolderInfo, LaunchPad, Release, State, Status, TimePeriod};
 
-// mod contract;
+mod dex;
 mod errors;
 mod events;
+mod helper;
 mod params;
 mod response;
 mod state;
-// mod types;
 
 #[cfg(test)]
 mod tests;
 
-pub type ContractResult<A> = Result<A, LaunchPadError>;
+pub type ContractResult<A> = Result<A, Error>;
 
 /// Alias for String as launch pad product name
 pub type ProductName = String;
@@ -85,7 +85,7 @@ fn init(ctx: &InitContext, state_builder: &mut StateBuilder) -> InitResult<State
     name = "CreateLaunchPad",
     mutable,
     parameter = "CreateParams",
-    error = "LaunchPadError",
+    error = "Error",
     enable_logger,
     payable
 )]
@@ -96,7 +96,7 @@ fn create_launchpad(
     logger: &mut Logger,
 ) -> ContractResult<()> {
     // Ensure that the sender is an account.
-    ensure!(ctx.sender().is_account(), LaunchPadError::OnlyAccount);
+    ensure!(ctx.sender().is_account(), Error::OnlyAccount);
 
     // parse the parameter
     let params: CreateParams = ctx.parameter_cursor().get()?;
@@ -104,12 +104,12 @@ fn create_launchpad(
     // Esnure that user pays the complete registeration Fee
     ensure!(
         amount >= host.state().admin_registeration_fee(),
-        LaunchPadError::Insufficient
+        Error::Insufficient
     );
 
     // Ensure hard-cap is greater than the soft-cap
     if let Some(hard_cap) = params.hard_cap {
-        ensure!(hard_cap > params.soft_cap, LaunchPadError::SmallerHardCap)
+        ensure!(hard_cap > params.soft_cap, Error::Insufficient)
     }
 
     let time_now = ctx.metadata().block_time();
@@ -122,7 +122,7 @@ fn create_launchpad(
     // and has minimum duration of 7 days
     ensure!(
         params.cliff().millis() > MIN_CLIFF_DURATION,
-        LaunchPadError::InCorrectCliffPeriod
+        Error::InCorrect
     );
 
     // Creating the Launch-pad from user defined params and
@@ -134,7 +134,7 @@ fn create_launchpad(
         // If the launch-pad with the same product name exists
         // it will not allow the launch-pad to be inserted
         Entry::Occupied(_) => {
-            bail!(LaunchPadError::ProductNameAlreadyTaken)
+            bail!(Error::Taken)
         }
         // Or else it will insert the launch-pad in State and
         // dispatch the launch pad creation event
@@ -161,7 +161,7 @@ fn create_launchpad(
     name = "ApproveLaunchPad",
     mutable,
     parameter = "ApprovalParams",
-    error = "LaunchPadError",
+    error = "Error",
     enable_logger
 )]
 fn approve_launchpad(
@@ -170,12 +170,12 @@ fn approve_launchpad(
     logger: &mut Logger,
 ) -> ContractResult<()> {
     // Ensure that the sender is an account.
-    ensure!(ctx.sender().is_account(), LaunchPadError::OnlyAccount);
+    ensure!(ctx.sender().is_account(), Error::OnlyAccount);
 
     // Only admin is allowed to approve launch-pad for presale
     ensure!(
         ctx.sender() == host.state().admin_address().into(),
-        LaunchPadError::OnlyAdmin
+        Error::UnAuthorized
     );
 
     // Product name is passed as parameter to identify the
@@ -188,7 +188,7 @@ fn approve_launchpad(
 
     let transfer_to = if params.approve {
         // Updating the launch-pad status to approved
-        launch_pad.status = LaunchPadStatus::APPROVED;
+        launch_pad.status = Status::APPROVED;
 
         logger.log(&Event::APPROVED(ApproveEvent {
             launchpad_name: launch_pad.product_name(),
@@ -200,7 +200,7 @@ fn approve_launchpad(
     } else {
         // Updating the launch-pad status to rejected if analyst
         // has rejected the launchpad
-        launch_pad.status = LaunchPadStatus::REJECTED;
+        launch_pad.status = Status::REJECTED;
 
         logger.log(&Event::REJECTED(RejectEvent {
             launchpad_name: launch_pad.product_name(),
@@ -224,7 +224,7 @@ fn approve_launchpad(
     name = "Deposit",
     mutable,
     parameter = "OnReceivingCis2Params<TokenID, TokenAmount>",
-    error = "LaunchPadError",
+    error = "Error",
     enable_logger
 )]
 fn deposit_tokens(
@@ -235,7 +235,7 @@ fn deposit_tokens(
     // This entry point is only meant to be invoked by CIS2 contract
     // given by the product owner in launch-pad params
     let contract = match ctx.sender() {
-        Address::Account(_) => bail!(LaunchPadError::OnlyContract),
+        Address::Account(_) => bail!(Error::OnlyContract),
         Address::Contract(cis2_contract) => cis2_contract,
     };
 
@@ -259,14 +259,14 @@ fn deposit_tokens(
     // owner
     ensure!(
         from == Address::Account(launch_pad.get_product_owner()),
-        LaunchPadError::UnAuthorized
+        Error::UnAuthorized
     );
 
     // Ensure that the correct CIS2 contract invoked the
     // deposit entry point using OnReceive hook
     ensure!(
         contract == launch_pad.get_cis2_contract(),
-        LaunchPadError::WrongContract
+        Error::UnAuthorized
     );
 
     // Ensure other details, such as the correct token amount
@@ -274,16 +274,16 @@ fn deposit_tokens(
     // matching the token ID given in launch-pad params
     ensure!(
         amount == launch_pad.get_product_token_amount(),
-        LaunchPadError::WrongTokenAmount
+        Error::InCorrect
     );
     ensure!(
         token_id == launch_pad.get_product_token_id(),
-        LaunchPadError::WrongTokenID
+        Error::InCorrect
     );
 
     // If every claim is valid, Launch-pad is made LIVE for presale
     // for the current product
-    launch_pad.status = LaunchPadStatus::LIVE;
+    launch_pad.status = Status::LIVE;
 
     // Dispatching the event as notification when the vesting start
     // as soon as the allocated tokens are deposited
@@ -301,11 +301,11 @@ fn deposit_tokens(
     name = "LivePause",
     mutable,
     parameter = "LivePauseParams",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     // Only Account is supposed to invoke this method
-    ensure!(ctx.sender().is_account(), LaunchPadError::OnlyAccount);
+    ensure!(ctx.sender().is_account(), Error::OnlyAccount);
 
     // Reading parameters
     let params: LivePauseParams = ctx.parameter_cursor().get()?;
@@ -318,33 +318,35 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     ensure!(
         ctx.sender()
             .matches_account(&launch_pad.get_product_owner()),
-        LaunchPadError::UnAuthorized
+        Error::UnAuthorized
     );
 
     // Launch pad can only be pause during vesting or before
     // reaching the soft cap
-    ensure!(launch_pad.reached_soft_cap(), LaunchPadError::SoftReached);
-    ensure!(launch_pad.is_finished(ctx), LaunchPadError::Finished);
+    ensure!(
+        !launch_pad.reached_soft_cap() && !launch_pad.is_finished(ctx),
+        Error::JobFailed
+    );
 
     // Check if owner wants to pause the launch pad
     if params.to_pause {
         // Check if the launch pad is already paused
-        ensure!(launch_pad.is_live(), LaunchPadError::Paused);
+        ensure!(launch_pad.is_live(), Error::JobFailed);
         // Check if the pause limit reached, launch pad is allowed
         // to be paused 3 times
         ensure!(
             launch_pad.current_pause_count() < MAX_PAUSE_COUNT,
-            LaunchPadError::PauseLimit
+            Error::Limit
         );
         // Check if the pause duration given is not less than the
         // minimum allowed pause duration 48 hrs
         ensure!(
             params.pause_duration.duration_as_millis() >= MIN_PAUSE_DURATION,
-            LaunchPadError::PauseDuration
+            Error::Limit
         );
 
         // Pausing the launch pad
-        launch_pad.status = LaunchPadStatus::PAUSED;
+        launch_pad.status = Status::PAUSED;
         // Setting new pause details in launch pad
         launch_pad.pause.timeperiod = params.pause_duration;
         launch_pad.pause.count += 1;
@@ -353,16 +355,16 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     }
 
     // Whether the launch-pad is already live
-    ensure!(launch_pad.is_paused(), LaunchPadError::Live);
+    ensure!(launch_pad.is_paused(), Error::JobFailed);
     // Check if the time is still left for pause duration
     // to complete
     ensure!(
         launch_pad.is_pause_elapsed(ctx.metadata().block_time()),
-        LaunchPadError::TimeStillLeft
+        Error::NotElapsed
     );
 
     // Resuming the launch pad
-    launch_pad.status = LaunchPadStatus::LIVE;
+    launch_pad.status = Status::LIVE;
     // Resetting the pause durations
     launch_pad.pause.timeperiod = TimePeriod::default();
 
@@ -374,14 +376,14 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     name = "Vest",
     mutable,
     parameter = "VestParams",
-    error = "LaunchPadError",
+    error = "Error",
     payable
 )]
 fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> ContractResult<()> {
     // Only Account is supposed to invoke this method
     let holder = match ctx.sender() {
         Address::Account(acc) => acc,
-        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+        Address::Contract(_) => bail!(Error::OnlyAccount),
     };
 
     // Reading parameters
@@ -396,16 +398,17 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     // Make sure that the launch pad is not paused, is not canceled
     // or is not finished, either due to vesting duration elapsed or
     // due to hard cap limit reached
-    ensure!(!launch_pad.is_paused(), LaunchPadError::Paused);
-    ensure!(!launch_pad.is_canceled(), LaunchPadError::Canceled);
-    ensure!(!launch_pad.is_finished(ctx), LaunchPadError::Finished);
+    ensure!(
+        !launch_pad.is_paused() && !launch_pad.is_canceled() && !launch_pad.is_finished(ctx),
+        Error::JobFailed
+    );
 
     // Verify whether the payable vesting amount received is within the
     // min and max vesting allowed
     ensure!(
         params.token_amount >= launch_pad.vest_min()
             && params.token_amount <= launch_pad.vest_max(),
-        LaunchPadError::Insufficient
+        Error::Insufficient
     );
 
     let vest_max = launch_pad.vest_max();
@@ -420,7 +423,6 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
             entry.insert(HolderInfo {
                 tokens: params.token_amount,
                 invested: amount,
-                cycles_rolled: 0,
                 release_data: Release {
                     unlocked: state_builder.new_map(),
                     locked: state_builder.new_map(),
@@ -436,7 +438,7 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
                 // limit allowed
                 ensure!(
                     holder_info.tokens + params.token_amount < vest_max,
-                    LaunchPadError::VestLimit
+                    Error::Limit
                 );
                 holder_info.invested += amount;
                 holder_info.tokens += params.token_amount;
@@ -524,27 +526,29 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
     name = "ClaimTokens",
     mutable,
     parameter = "ClaimUnLockedParams",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     // Only Account is supposed to invoke this method
     let holder = match ctx.sender() {
         Address::Account(acc) => acc,
-        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+        Address::Contract(_) => bail!(Error::OnlyAccount),
     };
 
     // Reading the product name to identify the launch pad
     let params: ClaimUnLockedParams = ctx.parameter_cursor().get()?;
 
     // Getting the launch pad from state identified by the product name
-    let launch_pad = host
-        .state()
-        .get_launchpad(params.product_name.clone())?;
+    let launch_pad = host.state().get_launchpad(params.product_name.clone())?;
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished. As well as the cliff duration has elapsed
-    ensure!(launch_pad.is_canceled(), LaunchPadError::Canceled);
-    ensure!(launch_pad.is_finished(ctx), LaunchPadError::Vesting);
+    ensure!(
+        !launch_pad.is_canceled() && launch_pad.is_finished(ctx),
+        Error::JobFailed
+    );
+    // ensure!(!launch_pad.is_canceled(), Error::Canceled);
+    // ensure!(launch_pad.is_finished(ctx), Error::Vesting);
 
     if let Some(cycle_details) = launch_pad
         .get_holder_info(holder)?
@@ -556,11 +560,8 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
 
         // Ensuring that this cycle is not already claimed and cycle
         // duration of 1 month is passed since the last cycle.
-        ensure!(!claimed, LaunchPadError::Claimed);
-        ensure!(
-            ctx.metadata().block_time() >= timestamp,
-            LaunchPadError::NotElapsed
-        );
+        ensure!(!claimed, Error::Claimed);
+        ensure!(ctx.metadata().block_time() >= timestamp, Error::NotElapsed);
 
         let cis2_contract = launch_pad.get_cis2_contract();
         let token_id = launch_pad.get_product_token_id();
@@ -574,7 +575,7 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
         // Here are the allocated tokens transfered to the holder based on
         // the current release cycle count.
         Cis2Client::new(cis2_contract).transfer(
-            host, 
+            host,
             Transfer {
                 token_id,
                 amount: token_amount,
@@ -583,11 +584,13 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
                 data: AdditionalData::empty(),
             },
         )?;
+
+        return Ok(());
     }
 
-    // Return early with error if the cycle number supplied in 
+    // Return early with error if the cycle number supplied in
     // claim params does not exist.
-    Err(LaunchPadError::InCorrect)
+    Err(Error::InCorrect)
 }
 
 #[receive(
@@ -595,13 +598,13 @@ fn claim_tokens(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<
     name = "WithdrawFunds",
     mutable,
     parameter = "String",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     // Only Account is supposed to invoke this method
     let owner = match ctx.sender() {
         Address::Account(acc) => acc,
-        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+        Address::Contract(_) => bail!(Error::OnlyAccount),
     };
 
     // Reading the product name to identify the launch pad
@@ -611,25 +614,20 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
     let launch_pad = host.state().get_launchpad(product_name.clone())?;
 
     // Make sure that the transaction is authorized
-    ensure!(
-        owner == launch_pad.get_product_owner(),
-        LaunchPadError::UnAuthorized
-    );
+    ensure!(owner == launch_pad.get_product_owner(), Error::UnAuthorized);
 
     // Make sure that the launch pad is not paused, is not canceled
     // or is finished.
-    ensure!(!launch_pad.is_canceled(), LaunchPadError::Canceled);
-    ensure!(!launch_pad.is_completed(), LaunchPadError::Completed);
-    ensure!(launch_pad.is_finished(ctx), LaunchPadError::Vesting);
+    ensure!(
+        !launch_pad.is_canceled() && !launch_pad.is_completed() && launch_pad.is_finished(ctx),
+        Error::JobFailed
+    );
 
     // Owner can only withdraw collected funds if and only if
     // the product has acheived soft cap and the funds are not
     // already raised
     if !launch_pad.withdrawn && launch_pad.reached_soft_cap() {
-        ensure!(
-            launch_pad.reached_soft_cap(),
-            LaunchPadError::SoftNotReached
-        );
+        ensure!(launch_pad.reached_soft_cap(), Error::SoftCap);
 
         // Calculating the amount of funds in CCD to be locked
         // in liquidity according to the percentage provided by
@@ -657,51 +655,35 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         let lock_up_release_cycles = launch_pad.lock_up.release_cycles;
 
         // Making DEX as an operator of Launch pad in CIS2 contract
-        let response: Result<bool, Cis2ClientError<LaunchPadError>> = Cis2Client::new(
-            cis2_contract,
-        )
-        .update_operator(host, host.state().dex_address().into(), OperatorUpdate::Add);
+        update_operator_of(host, cis2_contract, dex_contract.into())?;
 
-        match response {
-            Ok(added) => {
-                ensure!(added, LaunchPadError::UpdateOperatorFailed)
-            }
-            Err(e) => {
-                bail!(e.into())
-            }
-        }
+        // Ensure that DEX has been added as the oprators
+        let response = Cis2Client::new(cis2_contract).operator_of(
+            host,
+            ctx.self_address().into(),
+            host.state().dex_address().into(),
+        )?;
+        ensure!(response, Error::JobFailed);
 
         // Adding the liquidity to the Platform's DEX and invoking
-        // DEX to get the assigned LPTokens against the liquidity.
-        host.invoke_contract(
-            &dex_contract,
-            &AddLiquidityParams {
+        DexClient::new(dex_contract).add_liquidity(
+            host,
+            token_id,
+            tokens_for_lp.into(),
+            ccd_lp_alloc,
+            cis2_contract,
+        )?;
+
+        let exchange = DexClient::new(dex_contract).get_exchange(
+            host,
+            &GetExchangeParams {
+                holder: Address::Contract(ctx.self_address()),
                 token: TokenInfo {
                     id: TokenIdVec(token_id.0.to_ne_bytes().into()),
                     address: cis2_contract,
                 },
-                token_amount: tokens_for_lp.into(),
             },
-            EntrypointName::new_unchecked("addLiquidity"),
-            ccd_lp_alloc,
         )?;
-
-        let exchange: ExchangeView = host
-            .invoke_contract(
-                &dex_contract,
-                &GetExchangeParams {
-                    holder: Address::Contract(ctx.self_address()),
-                    token: TokenInfo {
-                        id: TokenIdVec(token_id.0.to_ne_bytes().into()),
-                        address: cis2_contract,
-                    },
-                },
-                EntrypointName::new_unchecked("getExchange"),
-                Amount::zero(),
-            )?
-            .1
-            .unwrap()
-            .get()?;
 
         // Platform will charge a certain amount from allocated liquidity
         // in exchange of DEX services it provides to the product.
@@ -719,20 +701,18 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // This is all aligned with the platform's policies to prevent rug-pull
         // as much as possible.
         let lp_allocated: TokenAmount =
-            ((exchange.lp_tokens_supply - platform_lp_share.into()).0 / 2).into();
+            ((exchange.lp_tokens_supply.0 - platform_lp_share) / 2).into();
 
         // Transfering the DEX service charges to the platform as the LPTokens.
-        host.invoke_contract(
-            &dex_contract,
-            &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+        DexClient::new(host.state().dex_address()).transfer(
+            host,
+            TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
                 token_id: exchange.lp_token_id,
                 amount: platform_lp_share.into(),
                 from: ctx.self_address().into(),
                 to: concordium_cis2::Receiver::Account(host.state().admin_address()),
                 data: AdditionalData::empty(),
             }]),
-            EntrypointName::new_unchecked("transfer"),
-            Amount::zero(),
         )?;
 
         // Transfering the withdrawable amount to the owner in CCD
@@ -755,7 +735,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             .get_holders_mut()
         {
             let holder_contribution =
-                (holder_info.invested.micro_ccd / raised_funds_ccd.micro_ccd) * 100;
+                (holder_info.invested.micro_ccd * 100) / raised_funds_ccd.micro_ccd;
 
             let holder_lpts = (lp_allocated * holder_contribution).0 / 100;
 
@@ -817,7 +797,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         return Ok(());
     }
 
-    Err(LaunchPadError::Claimed)
+    Err(Error::Claimed)
 }
 
 #[receive(
@@ -825,12 +805,12 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
     name = "WithDrawLockedFunds",
     mutable,
     parameter = "ClaimLockedParams",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     let sender = match ctx.sender() {
         Address::Account(acc) => acc,
-        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+        Address::Contract(_) => bail!(Error::OnlyAccount),
     };
 
     let claim_params: ClaimLockedParams = ctx.parameter_cursor().get()?;
@@ -843,17 +823,14 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
 
             ensure!(
                 sender == launch_pad.get_product_owner(),
-                LaunchPadError::UnAuthorized
+                Error::UnAuthorized
             );
 
             if let Some(cycle_details) = launch_pad.locked_release.get(&cycle) {
                 let (token_amount, lp_token_id, timestamp, claimed) = *cycle_details;
 
-                ensure!(claimed, LaunchPadError::Claimed);
-                ensure!(
-                    ctx.metadata().block_time() >= timestamp,
-                    LaunchPadError::NotElapsed
-                );
+                ensure!(!claimed, Error::Claimed);
+                ensure!(ctx.metadata().block_time() >= timestamp, Error::NotElapsed);
 
                 host.state_mut()
                     .get_mut_launchpad(claim_params.product_name)?
@@ -861,7 +838,7 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
 
                 (lp_token_id, token_amount)
             } else {
-                return Err(LaunchPadError::InCorrect);
+                return Err(Error::InCorrect);
             }
         }
         Claimer::HOLDER(cycle) => {
@@ -875,11 +852,8 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
             {
                 let (token_amount, lp_token_id, timestamp, claimed) = *locked_cycle_details;
 
-                ensure!(!claimed, LaunchPadError::Claimed);
-                ensure!(
-                    ctx.metadata().block_time() <= timestamp,
-                    LaunchPadError::NotElapsed
-                );
+                ensure!(!claimed, Error::Claimed);
+                ensure!(ctx.metadata().block_time() >= timestamp, Error::NotElapsed);
 
                 host.state_mut()
                     .get_mut_launchpad(claim_params.product_name)?
@@ -887,23 +861,40 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
 
                 (lp_token_id, token_amount)
             } else {
-                return Err(LaunchPadError::InCorrect);
+                return Err(Error::InCorrect);
             }
         }
     };
 
-    host.invoke_contract(
-        &host.state().dex_address(),
-        &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+    DexClient::new(host.state().dex_address()).transfer(
+        host,
+        TransferParams(vec![Transfer {
             token_id: tokend_id,
             amount: token_amount,
             from: ctx.self_address().into(),
             to: concordium_cis2::Receiver::Account(sender),
             data: AdditionalData::empty(),
         }]),
-        EntrypointName::new_unchecked("transfer"),
-        Amount::zero(),
     )?;
+    // let result = host.invoke_contract(
+    //     &host.state().dex_address(),
+    //     &TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
+    //         token_id: tokend_id,
+    //         amount: token_amount,
+    //         from: ctx.self_address().into(),
+    //         to: concordium_cis2::Receiver::Account(sender),
+    //         data: AdditionalData::empty(),
+    //     }]),
+    //     EntrypointName::new_unchecked("transfer"),
+    //     Amount::zero(),
+    // );
+
+    // match result {
+    //     Ok(_) => Ok(()),
+    //     Err(err) => {
+
+    //     }
+    // }
 
     Ok(())
 }
@@ -913,13 +904,13 @@ fn withdraw_locked_funds(ctx: &ReceiveContext, host: &mut Host<State>) -> Contra
     name = "CancelLaunchPad",
     mutable,
     parameter = "String",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     // Only Account is supposed to invoke this method
     let owner = match ctx.sender() {
         Address::Account(acc) => acc,
-        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+        Address::Contract(_) => bail!(Error::OnlyAccount),
     };
 
     // Reading the product name to identify the launch pad
@@ -929,22 +920,19 @@ fn cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     let launch_pad = host.state().get_launchpad(product_name.clone())?;
 
     // Make sure that the transaction is authorized
-    ensure!(
-        owner == launch_pad.get_product_owner(),
-        LaunchPadError::UnAuthorized
-    );
+    ensure!(owner == launch_pad.get_product_owner(), Error::UnAuthorized);
 
     // Make sure that the launch pad is not already canceled, did not
     //reach the soft cap, launch pad is not completed.
     ensure!(
         !launch_pad.is_canceled() && !launch_pad.is_completed() && !launch_pad.reached_soft_cap(),
-        LaunchPadError::Canceled
+        Error::JobFailed
     );
 
     host.state_mut()
         .get_mut_launchpad(product_name)
         .unwrap()
-        .status = LaunchPadStatus::CANCELED;
+        .status = Status::CANCELED;
 
     Ok(())
 }
@@ -953,7 +941,7 @@ fn cancel(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
     contract = "LaunchPad",
     name = "viewState",
     return_value = "StateView",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn view_state(_: &ReceiveContext, host: &Host<State>) -> ContractResult<StateView> {
     let state = host.state();
@@ -976,7 +964,7 @@ fn view_state(_: &ReceiveContext, host: &Host<State>) -> ContractResult<StateVie
     contract = "LaunchPad",
     name = "viewAllLaunchPads",
     return_value = "AllLaunchPads",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn view_all_launch_pads(_: &ReceiveContext, host: &Host<State>) -> ContractResult<AllLaunchPads> {
     Ok(AllLaunchPads {
@@ -995,7 +983,7 @@ fn view_all_launch_pads(_: &ReceiveContext, host: &Host<State>) -> ContractResul
     name = "viewLaunchPad",
     parameter = "String",
     return_value = "LaunchPadView",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn view_launch_pad(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<LaunchPadView> {
     let product_name: ProductName = ctx.parameter_cursor().get()?;
@@ -1008,12 +996,12 @@ fn view_launch_pad(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<L
     contract = "LaunchPad",
     name = "viewMyLaunchPads",
     return_value = "LaunchPadsView",
-    error = "LaunchPadError"
+    error = "Error"
 )]
 fn view_my_launch_pads(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<LaunchPadsView> {
     let holder = match ctx.sender() {
         Address::Account(acc) => acc,
-        Address::Contract(_) => bail!(LaunchPadError::OnlyAccount),
+        Address::Contract(_) => bail!(Error::OnlyAccount),
     };
     // Gets all the launch pads IDs in which this holder is contributing
     let ids = host.state().my_launch_pads(holder)?;
