@@ -14,14 +14,13 @@ std = ["concordium-std/std", "concordium-cis2/std"]
 bump_alloc = ["concordium-std/bump_alloc"]
 
 [dependencies]
-concordium-std = { version = "10.1.0", default-features = false }
-concordium-cis2 = "6.2.0"
-derivative = "2"
+concordium-std = { workspace = true, default-features = false }
+concordium-cis2.workspace = true
 
 [dev-dependencies]
-concordium-smart-contract-testing = "4.3.0"
-concordium-std-derive = "6.0.0"
-rand = "0.8"
+concordium-smart-contract-testing.workspace = true
+concordium-std-derive.workspace= true
+rand.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
