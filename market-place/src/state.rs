@@ -2,17 +2,22 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use concordium_cis2::{IsTokenAmount, IsTokenId};
-use concordium_std::*;
+use concordium_cis2::IsTokenId;
+use concordium_std::{
+    self, AccountAddress, Amount, ContractAddress, DeserialWithState, SchemaType, Serial,
+    Serialize, StateApi, StateBuilder, StateMap,
+};
+
+use crate::{ContractTokenAmount, ContractTokenId};
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
-pub struct TokenInfo<T: IsTokenId> {
+pub struct TokenInfo<T = ContractTokenId> {
     pub id: T,
     pub address: ContractAddress,
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
-pub struct TokenOwnerInfo<T: IsTokenId> {
+pub struct TokenOwnerInfo<T = ContractTokenId> {
     pub id: T,
     pub address: ContractAddress,
     pub owner: AccountAddress,
@@ -29,7 +34,7 @@ impl<T: IsTokenId> TokenOwnerInfo<T> {
 }
 
 #[derive(Clone, Serialize, Copy, PartialEq, Eq, Debug)]
-pub struct TokenPriceState<A: IsTokenAmount> {
+pub struct TokenPriceState<A = ContractTokenAmount> {
     pub quantity: A,
     pub price: Amount,
 }
@@ -53,7 +58,7 @@ pub struct Commission {
 }
 
 #[derive(Debug, Serialize, SchemaType, PartialEq, Eq, Clone)]
-pub struct TokenListItem<T: IsTokenId, A: IsTokenAmount> {
+pub struct TokenListItem<T = ContractTokenId, A = ContractTokenAmount> {
     pub token_id: T,
     pub contract: ContractAddress,
     pub price: Amount,
@@ -65,18 +70,16 @@ pub struct TokenListItem<T: IsTokenId, A: IsTokenAmount> {
 
 #[derive(Serial, DeserialWithState)]
 #[concordium(state_parameter = "S")]
-pub struct State<S: HasStateApi, T: IsTokenId, A: IsTokenAmount + Copy> {
+pub struct State<T = ContractTokenId, A = ContractTokenAmount, S = StateApi> {
     pub commission: Commission,
     pub token_royalties: StateMap<TokenInfo<T>, TokenRoyaltyState, S>,
     pub token_prices: StateMap<TokenOwnerInfo<T>, TokenPriceState<A>, S>,
 }
 
-impl<S: HasStateApi, T: IsTokenId + Copy, A: IsTokenAmount + Copy + ops::Sub<Output = A>>
-    State<S, T, A>
-{
+impl State {
     /// Creates a new state with the given commission.
     /// The commission is given as a percentage basis, i.e. 10000 is 100%.
-    pub fn new(state_builder: &mut StateBuilder<S>, commission: u16) -> Self {
+    pub fn new(state_builder: &mut StateBuilder, commission: u16) -> Self {
         State {
             commission: Commission {
                 percentage_basis: commission,
@@ -87,13 +90,14 @@ impl<S: HasStateApi, T: IsTokenId + Copy, A: IsTokenAmount + Copy + ops::Sub<Out
     }
 
     /// Adds a token to Buyable Token List.
+    #[allow(unused_must_use, reason = "Since its a calculated operation")]
     pub fn list_token(
         &mut self,
-        token_info: &TokenInfo<T>,
+        token_info: &TokenInfo,
         owner: &AccountAddress,
         price: Amount,
         royalty: u16,
-        quantity: A,
+        quantity: ContractTokenAmount,
     ) {
         match self.token_royalties.get(token_info) {
             // If the token is already listed, do nothing.
@@ -116,7 +120,11 @@ impl<S: HasStateApi, T: IsTokenId + Copy, A: IsTokenAmount + Copy + ops::Sub<Out
         );
     }
 
-    pub(crate) fn decrease_listed_quantity(&mut self, token_info: &TokenOwnerInfo<T>, delta: A) {
+    pub(crate) fn decrease_listed_quantity(
+        &mut self,
+        token_info: &TokenOwnerInfo,
+        delta: ContractTokenAmount,
+    ) {
         if let Some(mut price) = self.token_prices.get_mut(token_info) {
             price.quantity = price.quantity - delta;
         }
@@ -125,9 +133,9 @@ impl<S: HasStateApi, T: IsTokenId + Copy, A: IsTokenAmount + Copy + ops::Sub<Out
     /// Gets a token from the buyable token list.
     pub fn get_listed(
         &self,
-        token_info: &TokenInfo<T>,
+        token_info: &TokenInfo,
         owner: &AccountAddress,
-    ) -> Option<(TokenRoyaltyState, TokenPriceState<A>)> {
+    ) -> Option<(TokenRoyaltyState, TokenPriceState)> {
         match self.token_royalties.get(token_info) {
             Some(r) => self
                 .token_prices
@@ -138,10 +146,10 @@ impl<S: HasStateApi, T: IsTokenId + Copy, A: IsTokenAmount + Copy + ops::Sub<Out
     }
 
     /// Gets a list of all tokens in the buyable token list.
-    pub fn list(&self) -> Vec<TokenListItem<T, A>> {
+    pub fn list(&self) -> Vec<TokenListItem> {
         self.token_prices
             .iter()
-            .filter_map(|p| -> Option<TokenListItem<T, A>> {
+            .filter_map(|p| -> Option<TokenListItem> {
                 let token_info = TokenInfo {
                     id: p.0.id,
                     address: p.0.address,
