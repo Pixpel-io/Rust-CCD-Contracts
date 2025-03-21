@@ -1,0 +1,23 @@
+[package]
+name = "market-place"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pixpel.io (https://pixpel.io/)"]
+description = "NFT market palce smart contract on concordium blockchain"
+
+[features]
+default = ["std", "bump_alloc"]
+std = ["concordium-std/std", "concordium-cis2/std"]
+bump_alloc = ["concordium-std/bump_alloc"]
+
+[dependencies]
+concordium-std = { workspace = true, default-features = false }
+concordium-cis2.workspace = true
+
+[dev-dependencies]
+concordium-smart-contract-testing.workspace = true
+concordium-std-derive.workspace = true
+rand.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]

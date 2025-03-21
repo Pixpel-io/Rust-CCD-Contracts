@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["launch-pad", "auction"]
+members = ["launch-pad", "auction", "market-place"]
 
 [workspace.dependencies]
 concordium-std = { version = "10.0.1", default-features = false }
