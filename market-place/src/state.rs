@@ -2,13 +2,17 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use concordium_cis2::IsTokenId;
+use concordium_cis2::{Cis2Client, IsTokenId};
 use concordium_std::{
-    self, AccountAddress, Amount, ContractAddress, DeserialWithState, SchemaType, Serial,
-    Serialize, StateApi, StateBuilder, StateMap,
+    self, AccountAddress, Amount, ContractAddress, Deserial, DeserialWithState, Entry, SchemaType,
+    Serial, Serialize, StateApi, StateBuilder, StateMap, StateSet,
 };
 
-use crate::{ContractTokenAmount, ContractTokenId};
+use crate::{
+    errors::Error, params::{self, InitParams, ListParams}, ContractTokenAmount, ContractTokenId
+};
+
+pub type TokenList<K = TokenIdentifier, V = TokenDetails, S = StateApi> = StateMap<K, V, S>;
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
 pub struct TokenInfo<T = ContractTokenId> {
@@ -52,9 +56,14 @@ pub struct TokenRoyaltyState {
 
 /// Marketplace Commission
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
-pub struct Commission {
+pub struct Commission(pub u16);
+
+impl Commission {
     /// Commission basis points. equals to percent * 100
-    pub percentage_basis: u16,
+    #[inline(always)]
+    pub fn percentage_basis(&self) -> u16 {
+        self.0
+    }
 }
 
 #[derive(Debug, Serialize, SchemaType, PartialEq, Eq, Clone)]
@@ -72,6 +81,9 @@ pub struct TokenListItem<T = ContractTokenId, A = ContractTokenAmount> {
 #[concordium(state_parameter = "S")]
 pub struct State<T = ContractTokenId, A = ContractTokenAmount, S = StateApi> {
     pub commission: Commission,
+    pub admin: AccountAddress,
+    pub pixp_client: PixPToken,
+    pub token_list: StateMap<TokenIdentifier, TokenDetails, S>,
     pub token_royalties: StateMap<TokenInfo<T>, TokenRoyaltyState, S>,
     pub token_prices: StateMap<TokenOwnerInfo<T>, TokenPriceState<A>, S>,
 }
@@ -79,18 +91,46 @@ pub struct State<T = ContractTokenId, A = ContractTokenAmount, S = StateApi> {
 impl State {
     /// Creates a new state with the given commission.
     /// The commission is given as a percentage basis, i.e. 10000 is 100%.
-    pub fn new(state_builder: &mut StateBuilder, commission: u16) -> Self {
+    pub fn new(state_builder: &mut StateBuilder, params: InitParams) -> Self {
         State {
-            commission: Commission {
-                percentage_basis: commission,
-            },
+            commission: Commission(params.commission),
+            pixp_client: PixPToken(params.pixp_id, params.pixp_address),
+            admin: params.admin,
+            token_list: state_builder.new_map(),
             token_royalties: state_builder.new_map(),
             token_prices: state_builder.new_map(),
         }
     }
 
+    #[inline]
+    #[must_use]
+    pub fn add_token(
+        &mut self,
+        owner: &AccountAddress,
+        token_params: ListParams,
+    ) -> bool {
+        match self.token_list.entry(TokenIdentifier {
+            id: token_params.id,
+            cis2_address: token_params.cis2_address,
+        }) {
+            Entry::Occupied(_) => return false,
+            Entry::Vacant(entry) => {
+                let _ = entry.insert(TokenDetails {
+                    price: token_params.price,
+                    quantity: token_params.quantity.into(),
+                    owner: *owner,
+                });
+
+                return true;
+            }
+        }
+    }
+
     /// Adds a token to Buyable Token List.
-    #[allow(unused_must_use, reason = "Since its a calculated operation")]
+    #[allow(
+        unused_must_use,
+        reason = "Its calculated, we dont care about state-map return type"
+    )]
     pub fn list_token(
         &mut self,
         token_info: &TokenInfo,
@@ -128,6 +168,14 @@ impl State {
         if let Some(mut price) = self.token_prices.get_mut(token_info) {
             price.quantity = price.quantity - delta;
         }
+    }
+
+    pub fn get_token(&self, id: ContractTokenId, cis2_address: ContractAddress) -> Result<TokenDetails, Error> {
+        if let Some(details) = self.token_list.get(&TokenIdentifier { id, cis2_address }) {
+            return Ok(*details);
+        }
+
+        return Err(Error::NotFound);
     }
 
     /// Gets a token from the buyable token list.
@@ -169,5 +217,37 @@ impl State {
                 }
             })
             .collect()
+    }
+}
+
+#[derive(Serial, Deserial, SchemaType, Clone, Copy)]
+pub struct PixPToken(pub ContractTokenId, pub ContractAddress);
+
+#[derive(Serial, Deserial, SchemaType)]
+pub struct TokenIdentifier {
+    pub id: ContractTokenId,
+    pub cis2_address: ContractAddress,
+}
+
+#[derive(Serial, Deserial, SchemaType, Clone, Copy)]
+pub struct TokenDetails {
+    pub price: Price,
+    pub quantity: u64,
+    pub owner: AccountAddress,
+}
+
+#[derive(Serial, Deserial, SchemaType, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Price {
+    CCD(u64),
+    PIXP(u64),
+}
+
+impl Price {
+    #[inline(always)]
+    pub fn value(&self) -> u64 {
+        match self {
+            Price::PIXP(amount) => *amount,
+            Price::CCD(amount) => *amount,
+        }
     }
 }

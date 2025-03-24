@@ -11,20 +11,24 @@
 //! reference purposes
 mod errors;
 mod params;
+mod response;
 mod state;
 
 use concordium_cis2::*;
 use concordium_std::*;
-use errors::MarketplaceError;
-use params::{AddParams, InitParams, TokenList};
-use state::{Commission, State, TokenInfo, TokenListItem, TokenRoyaltyState};
+use errors::Error;
+use params::{AddParams, BuyerParams, InitParams, ListParams, TokenList};
+use response::Token;
+use state::{
+    Commission, Price, State, TokenIdentifier, TokenInfo, TokenListItem, TokenRoyaltyState,
+};
 
 use crate::{params::TransferParams, state::TokenOwnerInfo};
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
 
-type ContractResult<A> = Result<A, MarketplaceError>;
+type ContractResult<A> = Result<A, Error>;
 
 const MAX_BASIS_POINTS: u16 = 10000;
 
@@ -41,66 +45,49 @@ type Cis2ClientResult<T> = Result<T, concordium_cis2::Cis2ClientError<()>>;
 /// This function can be called by using InitParams.
 /// The commission should be less than the maximum allowed value of 10000 basis
 /// points
-#[init(contract = "Market-NFT", parameter = "InitParams")]
+#[init(contract = "Market-Place", parameter = "InitParams")]
 fn init(ctx: &InitContext, state_builder: &mut StateBuilder) -> InitResult<State> {
-    let params: InitParams = ctx
-        .parameter_cursor()
-        .get()
-        .map_err(|_e| MarketplaceError::ParseParams)?;
+    let params: InitParams = ctx.parameter_cursor().get()?;
 
     ensure!(
         params.commission <= MAX_BASIS_POINTS,
-        MarketplaceError::InvalidCommission.into()
+        Error::InvalidCommission.into()
     );
 
-    Ok(State::new(state_builder, params.commission))
+    Ok(State::new(state_builder, params))
 }
 
 #[receive(
-    contract = "Market-NFT",
-    name = "add",
-    parameter = "AddParams",
+    contract = "Market-Place",
+    name = "ListToken",
+    parameter = "ListParams",
     mutable
 )]
 fn add(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
-    let params: AddParams = ctx
-        .parameter_cursor()
-        .get()
-        .map_err(|_e| MarketplaceError::ParseParams)?;
+    let params: ListParams = ctx.parameter_cursor().get().map_err(|_e| Error::Parse)?;
 
-    let sender_account_address: AccountAddress = match ctx.sender() {
-        Address::Account(account_address) => account_address,
-        Address::Contract(_) => bail!(MarketplaceError::CalledByAContract),
+    let sender = match ctx.sender() {
+        Address::Account(address) => address,
+        Address::Contract(_) => return Err(Error::OnlyContract),
     };
 
-    let token_info = TokenInfo {
-        address: params.cis_contract_address,
-        id: params.token_id,
-    };
-
-    ensure_supports_cis2(host, &params.cis_contract_address)?;
-    ensure_is_operator(host, ctx, &params.cis_contract_address)?;
+    ensure_supports_cis2(host, &params.cis2_address)?;
+    ensure_is_operator(host, ctx, &params.cis2_address)?;
     ensure_balance(
         host,
-        params.token_id,
-        &params.cis_contract_address,
-        sender_account_address,
-        params.quantity,
+        params.id,
+        &params.cis2_address,
+        sender,
+        params.quantity.into(),
     )?;
 
-    ensure!(
-        host.state().commission.percentage_basis + params.royalty <= MAX_BASIS_POINTS,
-        MarketplaceError::InvalidRoyalty
-    );
-    host.state_mut().list_token(
-        &token_info,
-        &sender_account_address,
-        params.price,
-        params.royalty,
-        params.quantity,
-    );
+    let (state, _) = host.state_and_builder();
 
-    Ok(())
+    if state.add_token(&sender, params) {
+        return Ok(());
+    }
+
+    Err(Error::JobFailed)
 }
 
 /// Allows for transferring the token specified by TransferParams.
@@ -109,93 +96,100 @@ fn add(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
 /// account can transfer an Asset by paying a price. The transfer will fail of
 /// the Amount paid is < token_quantity * token_price
 #[receive(
-    contract = "Market-NFT",
-    name = "transfer",
-    parameter = "TransferParams",
+    contract = "Market-Place",
+    name = "BuyToken",
+    parameter = "BuyerParams",
     mutable,
     payable
 )]
-fn transfer(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> ContractResult<()> {
-    let params: TransferParams = ctx
-        .parameter_cursor()
-        .get()
-        .map_err(|_e| MarketplaceError::ParseParams)?;
-
-    let token_info = TokenInfo {
-        id: params.token_id,
-        address: params.cis_contract_address,
+fn buy(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> ContractResult<()> {
+    let buyer = match ctx.sender() {
+        Address::Account(address) => address,
+        Address::Contract(_) => return Err(Error::OnlyContract),
     };
 
-    let listed_token = host
-        .state()
-        .get_listed(&token_info, &params.owner)
-        .ok_or(MarketplaceError::TokenNotListed)?;
+    let params: BuyerParams = ctx.parameter_cursor().get()?;
 
-    let listed_quantity = listed_token.1.quantity;
-    let price_per_unit = listed_token.1.price;
-    let token_royalty_state = listed_token.0;
+    let token_details = host.state().get_token(params.id, params.cis2_address)?;
 
-    ensure!(
-        listed_quantity.cmp(&params.quantity).is_ge(),
-        MarketplaceError::InvalidTokenQuantity
-    );
+    ensure!(params.quantity >= token_details.quantity, Error::JobFailed);
+    ensure!(params.payment == token_details.price, Error::InvalidPayment);
 
-    let price = price_per_unit * params.quantity.0;
-    ensure!(
-        amount.cmp(&price).is_ge(),
-        MarketplaceError::InvalidAmountPaid
-    );
+    match token_details.price {
+        Price::CCD(per_unit) => {
+            let net_amount = per_unit * params.quantity;
+            ensure!(
+                amount >= Amount::from_ccd(net_amount),
+                Error::InvalidTokenQuantity
+            );
 
-    let cis2_client = Cis2Client::new(params.cis_contract_address);
-    let res: Cis2ClientResult<SupportResult> = cis2_client.supports_cis2(host);
-    let res = match res {
-        Ok(res) => res,
-        Err(_) => bail!(MarketplaceError::Cis2ClientError),
-    };
-    // Checks if the CIS2 contract supports the CIS2 interface.
-    let cis2_contract_address = match res {
-        SupportResult::NoSupport => bail!(MarketplaceError::CollectionNotCis2),
-        SupportResult::Support => params.cis_contract_address,
-        SupportResult::SupportBy(contracts) => match contracts.first() {
-            Some(c) => *c,
-            None => bail!(MarketplaceError::CollectionNotCis2),
-        },
-    };
+            let comission = (net_amount * host.state().commission.percentage_basis() as u64) / 100;
 
-    let cis2_client = Cis2Client::new(cis2_contract_address);
-    let res: Cis2ClientResult<bool> = cis2_client.transfer(
+            host.invoke_transfer(&host.state().admin, Amount::from_ccd(comission))?;
+            host.invoke_transfer(
+                &token_details.owner,
+                Amount::from_ccd(net_amount - comission),
+            )?;
+        }
+        Price::PIXP(per_unit) => {
+            let net_amount = per_unit * params.quantity;
+
+            let pixp = host.state().pixp_client;
+            let admin = host.state().admin;
+
+            ensure_balance(host, pixp.0, &pixp.1, buyer, net_amount.into())?;
+
+            let comission = (net_amount * host.state().commission.percentage_basis() as u64) / 100;
+
+            Cis2Client::new(pixp.1).transfer(
+                host,
+                Transfer::<ContractTokenId, ContractTokenAmount> {
+                    token_id: pixp.0,
+                    amount: comission.into(),
+                    from: buyer.into(),
+                    to: admin.into(),
+                    data: AdditionalData::empty(),
+                },
+            )?;
+
+            Cis2Client::new(pixp.1).transfer(
+                host,
+                Transfer::<ContractTokenId, ContractTokenAmount> {
+                    token_id: pixp.0,
+                    amount: (net_amount - comission).into(),
+                    from: buyer.into(),
+                    to: token_details.owner.into(),
+                    data: AdditionalData::empty(),
+                },
+            )?;
+        }
+    }
+
+    Cis2Client::new(params.cis2_address).transfer(
         host,
-        Transfer {
-            amount: params.quantity,
-            from: Address::Account(params.owner),
-            to: Receiver::Account(params.to),
-            token_id: params.token_id,
+        Transfer::<ContractTokenId, ContractTokenAmount> {
+            token_id: params.id,
+            amount: params.quantity.into(),
+            from: token_details.owner.into(),
+            to: buyer.into(),
             data: AdditionalData::empty(),
         },
-    );
-
-    match res {
-        Ok(res) => res,
-        Err(_) => bail!(MarketplaceError::Cis2ClientError),
-    };
-
-    distribute_amounts(
-        host,
-        amount,
-        &params.owner,
-        &token_royalty_state,
-        &ctx.owner(),
     )?;
 
-    host.state_mut().decrease_listed_quantity(
-        &TokenOwnerInfo::from(token_info, &params.owner),
-        params.quantity,
-    );
+    host.state_mut()
+        .token_list
+        .get_mut(&TokenIdentifier {
+            id: params.id,
+            cis2_address: params.cis2_address,
+        })
+        .unwrap()
+        .quantity -= params.quantity;
+
     Ok(())
 }
 
 /// Returns a list of Added Tokens with Metadata which contains the token price
-#[receive(contract = "Market-NFT", name = "list", return_value = "TokenList")]
+#[receive(contract = "Market-Place", name = "list", return_value = "TokenList")]
 fn list(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<TokenList> {
     let tokens: Vec<TokenListItem<ContractTokenId, ContractTokenAmount>> = host
         .state()
@@ -206,6 +200,26 @@ fn list(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<TokenList> 
         .collect::<Vec<TokenListItem<ContractTokenId, ContractTokenAmount>>>();
 
     Ok(TokenList(tokens))
+}
+
+#[receive(
+    contract = "Market-Place",
+    name = "ViewTokenList",
+    return_value = "Vec<Token>"
+)]
+fn view_list(_ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<Vec<Token>> {
+    let mut list: Vec<Token> = Vec::new();
+
+    for (identifier, details) in host.state().token_list.iter() {
+        list.push(Token {
+            id: identifier.id,
+            price: details.price,
+            quantity: details.quantity,
+            owner: details.owner.clone(),
+        });
+    }
+
+    Ok(list)
 }
 
 struct DistributableAmounts {
@@ -225,11 +239,11 @@ fn ensure_supports_cis2(
 
     let res = match res {
         Ok(res) => res,
-        Err(_) => bail!(MarketplaceError::Cis2ClientError),
+        Err(_) => bail!(Error::Cis2ClientError),
     };
 
     match res {
-        SupportResult::NoSupport => bail!(MarketplaceError::CollectionNotCis2),
+        SupportResult::NoSupport => bail!(Error::CollectionNotCis2),
         SupportResult::SupportBy(_) => Ok(()),
         SupportResult::Support => Ok(()),
     }
@@ -248,9 +262,9 @@ fn ensure_is_operator(
         cis2_client.operator_of(host, ctx.sender(), Address::Contract(ctx.self_address()));
     let res = match res {
         Ok(res) => res,
-        Err(_) => bail!(MarketplaceError::Cis2ClientError),
+        Err(_) => bail!(Error::Cis2ClientError),
     };
-    ensure!(res, MarketplaceError::NotOperator);
+    ensure!(res, Error::NotOperator);
     Ok(())
 }
 
@@ -269,12 +283,9 @@ fn ensure_balance(
         cis2_client.balance_of(host, token_id, Address::Account(owner));
     let res = match res {
         Ok(res) => res,
-        Err(_) => bail!(MarketplaceError::Cis2ClientError),
+        Err(_) => bail!(Error::Cis2ClientError),
     };
-    ensure!(
-        res.cmp(&minimum_balance).is_ge(),
-        MarketplaceError::NoBalance
-    );
+    ensure!(res.cmp(&minimum_balance).is_ge(), Error::NoBalance);
 
     Ok(())
 }
@@ -286,7 +297,7 @@ fn distribute_amounts(
     token_owner: &AccountAddress,
     token_royalty_state: &TokenRoyaltyState,
     marketplace_owner: &AccountAddress,
-) -> Result<(), MarketplaceError> {
+) -> Result<(), Error> {
     let amounts = calculate_amounts(
         &amount,
         &host.state().commission,
@@ -294,7 +305,7 @@ fn distribute_amounts(
     );
 
     host.invoke_transfer(token_owner, amounts.to_seller)
-        .map_err(|_| MarketplaceError::InvokeTransferError)?;
+        .map_err(|_| Error::InvokeTransferError)?;
 
     if amounts
         .to_marketplace
@@ -302,7 +313,7 @@ fn distribute_amounts(
         .is_gt()
     {
         host.invoke_transfer(marketplace_owner, amounts.to_marketplace)
-            .map_err(|_| MarketplaceError::InvokeTransferError)?;
+            .map_err(|_| Error::InvokeTransferError)?;
     }
 
     if amounts
@@ -311,7 +322,7 @@ fn distribute_amounts(
         .is_gt()
     {
         host.invoke_transfer(&token_royalty_state.primary_owner, amounts.to_primary_owner)
-            .map_err(|_| MarketplaceError::InvokeTransferError)?;
+            .map_err(|_| Error::InvokeTransferError)?;
     };
 
     Ok(())
@@ -324,8 +335,8 @@ fn calculate_amounts(
     commission: &Commission,
     royalty_percentage_basis: u16,
 ) -> DistributableAmounts {
-    let commission_amount =
-        (*amount * commission.percentage_basis.into()).quotient_remainder(MAX_BASIS_POINTS.into());
+    let commission_amount = (*amount * commission.percentage_basis().into())
+        .quotient_remainder(MAX_BASIS_POINTS.into());
 
     let royalty_amount =
         (*amount * royalty_percentage_basis.into()).quotient_remainder(MAX_BASIS_POINTS.into());

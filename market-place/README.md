@@ -1,20 +1,34 @@
-# CIS2-Marketplace contract for [CIS2 Tokens](https://proposals.concordium.software/CIS/cis-2.html)
+# Market-Place
 
-In order to build, deploy, mint, transfer, etc all functions using concordium-client you can check the [Developer Portal](https://developer.concordium.software/en/mainnet/smart-contracts/tutorials/nft-marketplace/index.html)
+An NFT market place smart contract written in rust for concordium blockchain. This contract is intended to be integrated with / solely belongs to [Pixpel.io](https://pixpel.io/).
 
-## Build
+## Setup
+
+To build and test the contract, we must have done the prerequisite setup defined in the repository [README](../README.md) 
+
+## Build and Run
+
+Once everything is setup, now we can build the contract and deploy it on the concodium testnet. To build, deploy and
+interact with the contract, you can use these [commands](./commands.md) with these [schema-artifacts](./schema-artifacts/) using `concordium-client` cli tool.
+
+Or we can use the official concorium frontend tool for deploying and interacting the concordium smart contracts found here [sctool](https://sctools.mainnet.concordium.software/?__hstc=206253644.9e573ad0dcf77e4d730f208e53ab0481.1736862510663.1737015924307.1737026584228.5&__hssc=206253644.4.1737026584228&__hsfp=706028811)
+
+## Testing
+
+Several unit tests are implemented for funcntional and logical testing of the contract with aid of rust integration
+testing framework. Unit tests can be run as:
 
 ```bash
-yarn build
+# To run all available unit tests
+cargo test tests
+
+# To run a specefic module of unit tests
+cargo test tests::smoke
+
+# To run a specific unit test of a certain module
+cargo test tests::smoke::market_place_smoke
 ```
+All of the availble unit tests are found here [Tests](./src/tests)
 
-## Deploy
 
-Uses [`concordium-client`](https://developer.concordium.software/en/mainnet/net/references/concordium-client.html) to deploy the contract to the chain.
-Uses `node.testnet.concordium.com` node for deployment.
-
-```bash
-yarn deploy wallet-account
-```
-
-**Here `wallet-account` reffers to the account which you have setup in [`concordium-client`](https://developer.concordium.software/en/mainnet/net/references/concordium-client.html)**
+**Note:** This contract might fail for the following [reasons](./src/error.rs) listed as the errors.
