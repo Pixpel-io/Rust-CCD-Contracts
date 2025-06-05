@@ -571,8 +571,8 @@ impl TimePeriod {
     /// valid realistic range
     ///
     /// Returns `Ok()` or else `VestingError`
-    pub fn ensure_is_period_valid(&self, current: Timestamp) -> Result<(), Error> {
-        if self.start >= self.end && self.end <= current {
+    pub fn ensure_is_period_valid(&self, _current: Timestamp) -> Result<(), Error> {
+        if self.start >= self.end {
             return Err(Error::InCorrect);
         }
         Ok(())

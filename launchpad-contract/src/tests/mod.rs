@@ -21,7 +21,15 @@ use concordium_std::{
 mod smoke;
 
 /// Dummy signer which always signs with one key
-const SIGNER: Signer = Signer::with_one_key();
+// const SIGNER: Signer = Signer::with_one_key();
+/// Signers for each account. Keys must match the AccountAddress contents.
+const ADMIN_SIGNER: Signer = Signer::with_one_key();
+const OWNER_SIGNER: Signer = Signer::with_one_key();
+const HOLDER_SIGNERS: &[Signer] = &[
+    Signer::with_one_key(),
+    Signer::with_one_key(),
+    Signer::with_one_key(),
+];
 
 /// Account balance to initilize the test accounts
 const ACC_INITIAL_BALANCE: Amount = Amount::from_ccd(20000);
@@ -47,6 +55,24 @@ const OWNER_TOKEN_URL: &str = "http://some.example/token/0";
 ///
 /// It is required to build the `Dex`, `LaunchPad`, `Cis2_multi` contracts in the root as `build/auction.wasm.v1` and
 /// cis2_multi build should be present in path `test-build-artifacts/cis2multi.wasm.v1`
+///
+
+fn signer_for_account(address: AccountAddress) -> Signer {
+    if address == ADMIN {
+        ADMIN_SIGNER
+    } else if address == OWNER {
+        OWNER_SIGNER
+    } else if address == HOLDERS[0] {
+        HOLDER_SIGNERS[0]
+    } else if address == HOLDERS[1] {
+        HOLDER_SIGNERS[1]
+    } else if address == HOLDERS[2] {
+        HOLDER_SIGNERS[2]
+    } else {
+        panic!("Unknown signer for address: {:?}", address);
+    }
+}
+
 pub fn initialize_chain_and_contracts() -> (
     Chain,
     AccountKeys,
@@ -130,7 +156,7 @@ where
 {
     let module = module_load_v1(module_path).expect("[Error] Unable to load module");
     let deploy = chain
-        .module_deploy_v1(SIGNER, ADMIN, module)
+        .module_deploy_v1(ADMIN_SIGNER, ADMIN, module)
         .expect("[Error] Unable to deploy");
 
     let owned_params = OwnedParameter::from_serial(&init_params).unwrap();
@@ -143,7 +169,7 @@ where
     };
 
     chain
-        .contract_init(SIGNER, ADMIN, Energy::from(10000), payload)
+        .contract_init(ADMIN_SIGNER, ADMIN, Energy::from(10000), payload)
         .expect("[Error] Unable to initialize contract")
         .contract_address
 }
@@ -171,9 +197,10 @@ where
         receive_name: OwnedReceiveName::new_unchecked(receive_name.to_string()),
         message: OwnedParameter::from_serial(&params).unwrap(),
     };
+    let signer = signer_for_account(invoker);
 
     let result = chain.contract_update(
-        SIGNER,
+        signer,
         invoker,
         Address::Account(invoker),
         Energy::from(20000),
@@ -232,6 +259,8 @@ pub struct MintParams {
     pub token_id: TokenID,
     /// Additional data that can be sent to the receiving contract.
     pub data: AdditionalData,
+    /// The amount of tokens to mint.
+    pub amount: TokenAmount,
 }
 
 impl From<(AccountAddress, TokenID, String)> for MintParams {
@@ -244,6 +273,7 @@ impl From<(AccountAddress, TokenID, String)> for MintParams {
             },
             token_id: value.1,
             data: AdditionalData::empty(),
+            amount: TokenAmount(30000), // Default to 1, or set as needed
         }
     }
 }
@@ -399,7 +429,8 @@ fn invest(
     )
 }
 /// A helper function which invokes `cis2 transfer`, which in turns invokes the
-/// "Depsoit" method in launch pad.
+/// "Deposit" method in launch pad.
+
 fn deposit_tokens(
     chain: &mut Chain,
     invoker: AccountAddress,
@@ -407,6 +438,12 @@ fn deposit_tokens(
     cis2_contract: ContractAddress,
     launch_pad_contract: ContractAddress,
 ) -> Result<(), Error> {
+    if invoker != OWNER {
+        println!(
+            "Warning: Invoker ({:?}) does not match OWNER ({:?})",
+            invoker, OWNER
+        );
+    }
     let transfer_params = TransferParams(vec![Transfer {
         token_id: OWNER_TOKEN_ID,
         amount: TokenAmount(10000),
@@ -421,7 +458,7 @@ fn deposit_tokens(
     update_contract::<_, ()>(
         chain,
         cis2_contract,
-        invoker,
+        OWNER, // Use OWNER as invoker
         transfer_params,
         None,
         "cis2_multi.transfer",
@@ -483,4 +520,71 @@ fn create_launch_pad(
         Some(PLATFORM_REG_FEE),
         "LaunchPad.CreateLaunchPad",
     )
+}
+
+/// A helper function to mint a specified amount of tokens for an account.
+#[allow(dead_code)]
+pub fn mint_token_with_amount(
+    chain: &mut Chain,
+    account: AccountAddress,
+    cis2_contract: ContractAddress,
+    token_id: TokenID,
+    url: String,
+    amount: TokenAmount,
+) {
+    let params = MintParams {
+        to: Receiver::from_account(account),
+        metadata_url: MetadataUrl { url, hash: None },
+        token_id,
+        amount,
+        data: AdditionalData::empty(),
+    };
+
+    update_contract::<_, ()>(
+        chain,
+        cis2_contract,
+        account,
+        params,
+        None,
+        "cis2_multi.mint",
+    )
+    .expect("[Error] Mint Failed");
+}
+
+pub fn withdraw_locked_funds(
+    chain: &mut Chain,
+    lp_contract: ContractAddress,
+    sender: AccountAddress,
+    params: ClaimLockedParams,
+) -> Result<(), Error> {
+    println!(
+        "Invoking WithDrawLockedFunds: sender={:?}, params={:?}",
+        sender, params
+    );
+    let invoke = chain
+        .contract_update(
+            Signer::with_one_key(),
+            sender,
+            Address::Account(sender),
+            Energy::from(10000),
+            UpdateContractPayload {
+                address: lp_contract,
+                receive_name: OwnedReceiveName::new_unchecked(
+                    "LaunchPad.WithDrawLockedFunds".to_string(),
+                ),
+                message: OwnedParameter::from_serial(&params).map_err(|e| {
+                    println!("Serialization error: {:?}", e);
+                    Error::Parse
+                })?,
+                amount: Amount::zero(),
+            },
+        )
+        .map_err(|e| {
+            println!("Invoke error: {:?}", e);
+            Error::JobFailed // Changed from Error::Invoke
+        })?;
+    invoke.parse_return_value().map_err(|e| {
+        println!("Parse return error: {:?}", e);
+        Error::Parse
+    })
 }

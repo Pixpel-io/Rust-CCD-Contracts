@@ -269,6 +269,12 @@ fn deposit_tokens(
         Error::UnAuthorized
     );
 
+    println!(
+        "Amount: {:?}, Expected: {:?}",
+        amount,
+        launch_pad.get_product_token_amount()
+    );
+
     // Ensure other details, such as the correct token amount
     // is received or we have received the correct tokens by
     // matching the token ID given in launch-pad params
@@ -304,70 +310,46 @@ fn deposit_tokens(
     error = "Error"
 )]
 fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()> {
-    // Only Account is supposed to invoke this method
     ensure!(ctx.sender().is_account(), Error::OnlyAccount);
-
-    // Reading parameters
     let params: LivePauseParams = ctx.parameter_cursor().get()?;
-
-    // Getting the launch pad from state identified by the product name
+    println!("Params: {:?}", params);
     let mut launch_pad = host.state_mut().get_mut_launchpad(params.poduct_name)?;
-
-    // Product owner (developer) is only allowed to pause
-    // the launch pad
     ensure!(
         ctx.sender()
             .matches_account(&launch_pad.get_product_owner()),
         Error::UnAuthorized
     );
-
-    // Launch pad can only be pause during vesting or before
-    // reaching the soft cap
     ensure!(
         !launch_pad.reached_soft_cap() && !launch_pad.is_finished(ctx),
         Error::JobFailed
     );
-
-    // Check if owner wants to pause the launch pad
     if params.to_pause {
-        // Check if the launch pad is already paused
         ensure!(launch_pad.is_live(), Error::JobFailed);
-        // Check if the pause limit reached, launch pad is allowed
-        // to be paused 3 times
         ensure!(
             launch_pad.current_pause_count() < MAX_PAUSE_COUNT,
             Error::Limit
         );
-        // Check if the pause duration given is not less than the
-        // minimum allowed pause duration 48 hrs
+        println!(
+            "Pause duration: {}, Min: {}",
+            params.pause_duration.duration_as_millis(),
+            MIN_PAUSE_DURATION
+        );
         ensure!(
             params.pause_duration.duration_as_millis() >= MIN_PAUSE_DURATION,
             Error::Limit
         );
-
-        // Pausing the launch pad
         launch_pad.status = Status::PAUSED;
-        // Setting new pause details in launch pad
         launch_pad.pause.timeperiod = params.pause_duration;
         launch_pad.pause.count += 1;
-
         return Ok(());
     }
-
-    // Whether the launch-pad is already live
     ensure!(launch_pad.is_paused(), Error::JobFailed);
-    // Check if the time is still left for pause duration
-    // to complete
     ensure!(
         launch_pad.is_pause_elapsed(ctx.metadata().block_time()),
         Error::NotElapsed
     );
-
-    // Resuming the launch pad
     launch_pad.status = Status::LIVE;
-    // Resetting the pause durations
     launch_pad.pause.timeperiod = TimePeriod::default();
-
     Ok(())
 }
 
@@ -380,45 +362,31 @@ fn live_pause(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResult<()
     payable
 )]
 fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> ContractResult<()> {
-    // Only Account is supposed to invoke this method
     let holder = match ctx.sender() {
         Address::Account(acc) => acc,
         Address::Contract(_) => bail!(Error::OnlyAccount),
     };
-
-    // Reading parameters
     let params: VestParams = ctx.parameter_cursor().get()?;
-
-    // Getting the contract's core state and its builder
     let (state, state_builder) = host.state_and_builder();
-
-    // Getting the launch pad from state identified by the product name
     let mut launch_pad = state.get_mut_launchpad(params.product_name)?;
-
-    // Make sure that the launch pad is not paused, is not canceled
-    // or is not finished, either due to vesting duration elapsed or
-    // due to hard cap limit reached
     ensure!(
         !launch_pad.is_paused() && !launch_pad.is_canceled() && !launch_pad.is_finished(ctx),
         Error::JobFailed
     );
-
-    // Verify whether the payable vesting amount received is within the
-    // min and max vesting allowed
     ensure!(
         params.token_amount >= launch_pad.vest_min()
             && params.token_amount <= launch_pad.vest_max(),
         Error::Insufficient
     );
 
-    let vest_max = launch_pad.vest_max();
+    // Check hard cap
+    let total_collected = launch_pad.collected + amount;
+    if let Some(hard_cap) = launch_pad.hard_cap {
+        ensure!(total_collected <= hard_cap, Error::JobFailed);
+    }
 
-    // Updating or inserting the holder(investor) depending whether the
-    // holder is new or existing in the launch pad state
+    let vest_max = launch_pad.vest_max();
     match launch_pad.holders.entry(holder) {
-        // If holder is new to the launch pad, insert him to
-        // the holders list along with his invested amount
-        // and claimable tokens
         Entry::Vacant(entry) => {
             entry.insert(HolderInfo {
                 tokens: params.token_amount,
@@ -429,13 +397,8 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
                 },
             });
         }
-        // If holder already exist in the launch pad, then
-        // just update it's previous amount and claimable
-        // tokens.
         Entry::Occupied(mut entry) => {
             let _ = entry.modify(|holder_info| {
-                // Ensure that holder does not exceeds the max vesting
-                // limit allowed
                 ensure!(
                     holder_info.tokens + params.token_amount < vest_max,
                     Error::Limit
@@ -446,47 +409,24 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
             });
         }
     }
-
-    // Updating the collected investment and allocated tokens sold so far
-    // by the product
     launch_pad.collected += amount;
     launch_pad.sold_tokens += params.token_amount;
     launch_pad.available_tokens -= params.token_amount;
-
-    // Get the amount of tokens allocated for presale by the owner
     let allocated_tokens = launch_pad.product.allocated_tokens;
-    // Check if the product has acheived soft cap
     let reached_soft_cap = launch_pad.reached_soft_cap();
-    // Check if the product has paid the soft cap share to the platform
     let allocation_paid = launch_pad.allocation_paid;
-
     let product_name = launch_pad.product_name();
-
     drop(launch_pad);
-
-    // This is where the allocation share is transfered to the platform admin.
-    // Allocation share is paid only once, if the product has just reached the
-    // soft cap and the share is not yet paid.
-    //
-    // Allocation share is paid in terms of perecentile amount of tokens from the
-    // product ICO (initial coin offering)
     if reached_soft_cap && !allocation_paid {
         let allocated_cut =
             ((allocated_tokens.0 * host.state().admin_allocation_share()) / 100).into();
         let admin_address = host.state().admin_address();
         let mut launchpad = host.state_mut().get_mut_launchpad(product_name.clone())?;
         let token_id = launchpad.get_product_token_id();
-
         let cis2_client = Cis2Client::new(launchpad.get_cis2_contract());
-
         launchpad.allocation_paid = true;
         launchpad.available_tokens -= allocated_cut;
-
         drop(launchpad);
-
-        // Transfering the calculated amount of product tokens
-        // as allocated cut based on the allocation share percent
-        // to the platform admin.
         cis2_client.transfer(
             host,
             Transfer {
@@ -498,17 +438,10 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
             },
         )?;
     }
-
-    // Contract's core State maintains the list of all the holders(invesotrs)
-    // from every launch pad with their associated launch pads in which they
-    // are contributing. There may be more than one launch pad for a single
-    // holder.
     match host.state_mut().investors.entry(holder) {
-        // Insert the new holder to the state with launch pad ID
         Entry::Vacant(entry) => {
             entry.insert(vec![product_name]);
         }
-        // Update the existing holder in the state with launch pad ID
         Entry::Occupied(mut entry) => {
             entry.modify(|launchpads| {
                 if !launchpads.contains(&product_name) {
@@ -517,7 +450,6 @@ fn vest(ctx: &ReceiveContext, host: &mut Host<State>, amount: Amount) -> Contrac
             });
         }
     }
-
     Ok(())
 }
 
