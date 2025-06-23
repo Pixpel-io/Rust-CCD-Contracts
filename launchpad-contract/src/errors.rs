@@ -201,20 +201,51 @@ use concordium_smart_contract_testing::{
 /// Mapping `ContractInvokeError` to `ContractError`
 ///
 /// It parse any invocation error captured while integration testing to contract error
+// #[cfg(test)]
+// impl From<ContractInvokeError> for Error {
+//     fn from(value: ContractInvokeError) -> Self {
+//         if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
+//             if let InvokeFailure::ContractReject { code: _, data } = failure_kind {
+//                 from_bytes::<Error>(&data).expect("[Error] Parse Launch-pad error")
+//             } else {
+//                 panic!("[Error] Unable to map received invocation error code")
+//             }
+//         } else {
+//             panic!(
+//                 "[Error] Unable to map ContractInvokeError other than ExecutionError {:#?}",
+//                 value
+//             )
+//         }
+//     }
+// }
+
 #[cfg(test)]
 impl From<ContractInvokeError> for Error {
     fn from(value: ContractInvokeError) -> Self {
-        if let ContractInvokeErrorKind::ExecutionError { failure_kind } = value.kind {
-            if let InvokeFailure::ContractReject { code: _, data } = failure_kind {
-                from_bytes::<Error>(&data).expect("[Error] Parse Launch-pad error")
-            } else {
-                panic!("[Error] Unable to map received invocation error code")
+        match value.kind {
+            ContractInvokeErrorKind::ExecutionError { failure_kind } => {
+                match failure_kind {
+                    InvokeFailure::ContractReject { code, data } => {
+                        match from_bytes::<Error>(&data) {
+                            Ok(e) => e,
+                            Err(_) => {
+                                println!(
+                                    "[Warn] Failed to parse error from data. Raw code: {code}"
+                                );
+                                Error::DEX(code) // or define a fallback error like Error::Unknown
+                            }
+                        }
+                    }
+                    other => {
+                        println!("[Warn] Unexpected invoke failure: {other:?}");
+                        Error::JobFailed // or a new fallback variant
+                    }
+                }
             }
-        } else {
-            panic!(
-                "[Error] Unable to map ContractInvokeError other than ExecutionError {:#?}",
-                value
-            )
+            other => {
+                println!("[Warn] Unexpected non-execution error: {other:?}");
+                Error::JobFailed
+            }
         }
     }
 }

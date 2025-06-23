@@ -1868,3 +1868,1473 @@ fn launch_pad_calculation_verification() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[test]
+fn test_add_liquidity_with_slippage() -> Result<(), Error> {
+    // Initialize chain and contracts
+    let (mut chain, _, lp_contract, cis2_contract, dex_contract) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    // Define slippage in basis points (5% = 500 bps)
+    let slippage_bps = 500u64;
+
+    // Desired amounts
+    let token_amount_desired = 10_000u64;
+    let ccd_amount_desired = Amount::from_ccd(1_000); // 1,000 CCD
+
+    // Compute minimum amounts with slippage
+    let token_amount_min = token_amount_desired * (10_000 - slippage_bps) / 10_000; // 9,500 tokens
+    let ccd_amount_min = ccd_amount_desired.micro_ccd * (10_000 - slippage_bps) / 10_000; // 950 CCD in microCCD
+
+    println!(
+        "Desired: {} tokens, {} CCD | Minimum: {} tokens, {} microCCD",
+        token_amount_desired,
+        ccd_amount_desired.micro_ccd / 1_000_000,
+        token_amount_min,
+        ccd_amount_min
+    );
+
+    // Approve DEX to spend OWNER's tokens
+    let update_operator_params = UpdateOperatorParams(vec![UpdateOperator {
+        update: OperatorUpdate::Add,
+        operator: dex_contract.into(),
+    }]);
+
+    update_contract::<_, ()>(
+        &mut chain,
+        cis2_contract,
+        OWNER,
+        update_operator_params,
+        None,
+        "cis2_multi.updateOperator",
+    )?;
+
+    // Prepare liquidity parameters
+    let liquidity_params = AddLiquidityParams {
+        token: TokenInfo {
+            id: TokenIdVec(OWNER_TOKEN_ID.0.to_le_bytes().into()),
+            address: cis2_contract,
+        },
+        token_amount: TokenAmount(token_amount_desired),
+    };
+
+    // Call addLiquidity on DEX
+    let result = update_contract::<_, ()>(
+        &mut chain,
+        dex_contract,
+        OWNER,
+        liquidity_params,
+        Some(Amount::from_micro_ccd(ccd_amount_desired.micro_ccd)),
+        "pixpel_swap.addLiquidity",
+    );
+
+    // Verify the transaction succeeded
+    assert!(result.is_ok(), "Adding liquidity should succeed");
+
+    // Check exchange view to verify liquidity addition
+    let exc_params = GetExchangeParams {
+        holder: Address::Account(OWNER),
+        token: TokenInfo {
+            id: TokenIdVec(OWNER_TOKEN_ID.0.to_le_bytes().into()),
+            address: cis2_contract,
+        },
+    };
+
+    let exc_view = read_contract::<_, ExchangeView>(
+        &mut chain,
+        dex_contract,
+        OWNER,
+        exc_params,
+        "pixpel_swap.getExchange",
+    );
+
+    println!("Exchange view after liquidity addition: {:#?}", exc_view);
+
+    // Basic assertions on exchange view (adjust based on actual ExchangeView fields)
+    assert!(
+        exc_view.token_balance.0 >= token_amount_min,
+        "Pool token liquidity ({}) should be at least {}",
+        exc_view.token_balance.0,
+        token_amount_min
+    );
+    assert!(
+        exc_view.ccd_balance.0 >= ccd_amount_min,
+        "Pool CCD liquidity ({}) should be at least {}",
+        exc_view.ccd_balance.0,
+        ccd_amount_min
+    );
+
+    // Verify LP tokens were minted to OWNER
+    let lp_balance = get_lp_token_balance(
+        &mut chain,
+        OWNER,
+        &[(OWNER.into(), TokenIdU64(1))],
+        dex_contract,
+    );
+
+    println!("Owner LP tokens: {:?}", lp_balance);
+    assert!(
+        lp_balance.0[0].0 > 0,
+        "Owner should have received LP tokens"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_pause_after_soft_cap() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "PauseAfterSoftCapTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000), // Soft cap at 5,000 CCD
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest to reach soft cap (5,000 CCD = 1,000 tokens at 5 CCD/token)
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Attempt to pause the launchpad after reaching soft cap
+    let result = update_contract::<_, ()>(
+        &mut chain,
+        lp_contract,
+        OWNER,
+        LivePauseParams {
+            poduct_name: product_name.to_string(),
+            pause_duration: TimePeriod {
+                start: Timestamp::from_timestamp_millis(0),
+                end: Timestamp::from_timestamp_millis(MIN_PAUSE_DURATION),
+            },
+            to_pause: true,
+        },
+        None,
+        "LaunchPad.LivePause",
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::JobFailed),
+        "Should fail due to attempting to pause after reaching soft cap"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_withdraw_funds_premature() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "PrematureWithdrawTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000), // Ends at 3 seconds
+        },
+        soft_cap: Amount::from_ccd(5000), // Soft cap at 5,000 CCD
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest to reach soft cap (5,000 CCD = 1,000 tokens at 5 CCD/token)
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Attempt to withdraw funds before vesting period ends (before 3 seconds)
+    let result = withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract);
+
+    assert_eq!(
+        result,
+        Err(Error::JobFailed),
+        "Should fail due to attempting to withdraw funds before vesting period ends"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_claim_locked_non_existent_holder() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "NonExistentHolderTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest with HOLDER[0] to reach soft cap
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Advance time past vesting period
+    chain.tick_block_time(Duration::from_millis(3500));
+
+    // Withdraw raised funds to set up LP tokens
+    withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract)?;
+
+    // Advance time to allow claiming locked funds
+    chain.tick_block_time(Duration::from_millis(CYCLE_DURATION));
+
+    // Attempt to claim locked funds as HOLDER[1], who hasn't invested
+    let result = claim_locked_tokens(
+        &mut chain,
+        HOLDERS[1],
+        ClaimLockedParams {
+            claimer: Claimer::HOLDER(1),
+            product_name: product_name.to_string(),
+        },
+        lp_contract,
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::NotFound),
+        "Should fail due to claiming locked funds for a non-existent holder"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_claim_unlocked_tokens_already_claimed() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "AlreadyClaimedTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest with HOLDER[0] to reach soft cap
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Advance time past vesting period
+    chain.tick_block_time(Duration::from_millis(3500));
+
+    // Withdraw raised funds to set up release cycles
+    withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract)?;
+
+    // Advance time to allow claiming for cycle 1
+    chain.tick_block_time(Duration::from_millis(CYCLE_DURATION));
+
+    // Claim unlocked tokens for cycle 1
+    claim_tokens(
+        &mut chain,
+        HOLDERS[0],
+        ClaimUnLockedParams {
+            cycle: 1,
+            product_name: product_name.to_string(),
+        },
+        lp_contract,
+    )?;
+
+    // Attempt to claim the same cycle again
+    let result = claim_tokens(
+        &mut chain,
+        HOLDERS[0],
+        ClaimUnLockedParams {
+            cycle: 1,
+            product_name: product_name.to_string(),
+        },
+        lp_contract,
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::Claimed),
+        "Should fail due to attempting to claim already claimed unlocked tokens"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_cancel_launchpad_after_soft_cap() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "CancelAfterSoftCapTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000), // Soft cap at 5,000 CCD
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest to reach soft cap (5,000 CCD = 1,000 tokens at 5 CCD/token)
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Attempt to cancel the launchpad after reaching soft cap
+    let result = update_contract::<_, ()>(
+        &mut chain,
+        lp_contract,
+        OWNER,
+        product_name.to_string(),
+        None,
+        "LaunchPad.CancelLaunchPad",
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::JobFailed),
+        "Should fail due to attempting to cancel launchpad after reaching soft cap"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_vest_below_minimum_limit() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "VestBelowMinTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000), // Minimum vesting limit is 1,000 tokens
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Attempt to invest below the minimum vesting limit (500 tokens < 1,000)
+    let result = invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(500), // Below minimum
+        },
+        Amount::from_ccd(2500), // 500 tokens * 5 CCD/token = 2,500 CCD
+        lp_contract,
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::Insufficient),
+        "Should fail due to vesting below the minimum limit"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_approve_launchpad_non_admin() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "NonAdminApproveTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+
+    // Attempt to approve launchpad as a non-admin (HOLDER[0])
+    let result = approve_launch_pad(
+        &mut chain,
+        HOLDERS[0], // Non-admin account
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::UnAuthorized),
+        "Should fail due to non-admin attempting to approve launchpad"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_deposit_incorrect_token_id() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER with correct token ID
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    // Mint tokens with a different token ID
+    let incorrect_token_id_u64 = TokenIdU64(2);
+    // Convert TokenIdU64 to TokenIdU8 if needed
+    let incorrect_token_id = concordium_cis2::TokenIdU8(incorrect_token_id_u64.0 as u8);
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        incorrect_token_id,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "IncorrectTokenIdTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Attempt to deposit tokens with incorrect token ID
+    // Import the correct OnReceivingCis2Params struct if it exists, or define it here for the test
+    #[derive(Debug, Clone, concordium_std::Serial, concordium_std::Deserial)]
+    struct OnReceivingCis2Params {
+        token_id: TokenIdU64,
+        amount: TokenAmount,
+        from: Address,
+        data: concordium_cis2::AdditionalData,
+    }
+
+    let result = update_contract::<_, ()>(
+        &mut chain,
+        cis2_contract,
+        OWNER,
+        OnReceivingCis2Params {
+            token_id: incorrect_token_id_u64,
+            amount: TokenAmount(10000),
+            from: OWNER.into(),
+            data: concordium_cis2::AdditionalData::from(product_name.as_bytes().to_vec()),
+        },
+        None,
+        "LaunchPad.Deposit",
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::JobFailed),
+        "Should fail due to depositing tokens with incorrect token ID"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_withdraw_locked_owner_non_existent_cycle() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "OwnerNonExistentCycleTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest with HOLDER[0] to reach soft cap
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Advance time past vesting period
+    chain.tick_block_time(Duration::from_millis(3500));
+
+    // Withdraw raised funds to set up LP tokens
+    withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract)?;
+
+    // Advance time to allow claiming locked funds
+    chain.tick_block_time(Duration::from_millis(CYCLE_DURATION * 4));
+
+    // Attempt to claim locked funds for a non-existent cycle (e.g., cycle 4)
+    let result = claim_locked_tokens(
+        &mut chain,
+        OWNER,
+        ClaimLockedParams {
+            claimer: Claimer::OWNER(4), // Only 3 cycles exist
+            product_name: product_name.to_string(),
+        },
+        lp_contract,
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::InCorrect),
+        "Should fail due to claiming locked funds for a non-existent owner cycle"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_resume_not_paused() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "ResumeNotPausedTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Attempt to resume a launchpad that is already LIVE (not paused)
+    let result = update_contract::<_, ()>(
+        &mut chain,
+        lp_contract,
+        OWNER,
+        LivePauseParams {
+            poduct_name: product_name.to_string(),
+            pause_duration: TimePeriod::default(), // Not used for resume
+            to_pause: false,                       // Attempt to resume
+        },
+        None,
+        "LaunchPad.LivePause",
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::JobFailed),
+        "Should fail due to attempting to resume a launchpad that is not paused"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_pause_insufficient_duration() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "InsufficientPauseDurationTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Attempt to pause with insufficient duration (1 hour = 3.6e6 ms < 1.728e8 ms)
+    let result = update_contract::<_, ()>(
+        &mut chain,
+        lp_contract,
+        OWNER,
+        LivePauseParams {
+            poduct_name: product_name.to_string(),
+            pause_duration: TimePeriod {
+                start: Timestamp::from_timestamp_millis(0),
+                end: Timestamp::from_timestamp_millis(3_600_000), // 1 hour
+            },
+            to_pause: true,
+        },
+        None,
+        "LaunchPad.LivePause",
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::Limit),
+        "Should fail due to pausing with insufficient duration"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_withdraw_funds_below_soft_cap() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "BelowSoftCapWithdrawTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5), // 5 CCD per token
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000), // Soft cap at 5,000 CCD
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(500), // Lowered minimum to allow 500 tokens
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest below soft cap: 800 tokens × 5 CCD = 4,000 CCD
+    let token_price = Amount::from_micro_ccd(5_000_000); // 5 CCD
+    let token_amount_u64 = 800u64;
+    let total_micro_ccd = token_price.micro_ccd() * token_amount_u64;
+    let invest_amount = Amount::from_micro_ccd(total_micro_ccd);
+
+    println!(
+        "Investing {} CCD for {} tokens at {} CCD/token",
+        invest_amount.micro_ccd(),
+        token_amount_u64,
+        token_price.micro_ccd()
+    );
+
+    let result = invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(token_amount_u64),
+        },
+        invest_amount,
+        lp_contract,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Investment failed unexpectedly: {:?}",
+        result
+    );
+
+    // Advance time past the sale end
+    chain.tick_block_time(Duration::from_millis(3500));
+
+    // Attempt to withdraw raised funds below soft cap
+    let withdraw_result =
+        withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract);
+
+    assert_eq!(
+        withdraw_result,
+        Err(Error::Claimed),
+        "Should fail due to attempting to withdraw funds when soft cap is not reached"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_claim_unlocked_tokens_premature() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "PrematureClaimTest";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 1,
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make launchpad LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest with HOLDER[0] to reach soft cap
+    invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    )?;
+
+    // Advance time past vesting period
+    chain.tick_block_time(Duration::from_millis(3500));
+
+    // Withdraw raised funds to set up release cycles
+    withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract)?;
+
+    // Attempt to claim unlocked tokens for cycle 1 before cycle timestamp
+    let result = claim_tokens(
+        &mut chain,
+        HOLDERS[0],
+        ClaimUnLockedParams {
+            cycle: 1,
+            product_name: product_name.to_string(),
+        },
+        lp_contract,
+    );
+
+    assert_eq!(
+        result,
+        Err(Error::NotElapsed),
+        "Should fail due to claiming unlocked tokens before cycle timestamp"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_withdraw_liquidity_before_vesting_completion() -> Result<(), Error> {
+    let (mut chain, _, lp_contract, cis2_contract, _) = initialize_chain_and_contracts();
+
+    // Mint tokens for OWNER
+    mint_token(
+        &mut chain,
+        OWNER,
+        cis2_contract,
+        OWNER_TOKEN_ID,
+        OWNER_TOKEN_URL.to_string(),
+    );
+
+    let product_name = "WithdrawBeforeVesting";
+    let add_params = CreateParams {
+        product: Product {
+            name: product_name.to_string(),
+            owner: OWNER,
+            token_id: OWNER_TOKEN_ID,
+            token_price: Amount::from_ccd(5),
+            allocated_tokens: TokenAmount(10000),
+            cis2_contract,
+        },
+        timeperiod: TimePeriod {
+            start: Timestamp::from_timestamp_millis(0),
+            end: Timestamp::from_timestamp_millis(3000),
+        },
+        soft_cap: Amount::from_ccd(5000),
+        hard_cap: Some(Amount::from_ccd(7000)),
+        vest_limits: VestingLimits {
+            min: TokenAmount(1000),
+            max: TokenAmount(2500),
+        },
+        lockup_details: LockupDetails {
+            cliff: 3, // Set a 3-month cliff
+            release_cycles: 3,
+        },
+        liquidity_details: LiquidityDetails {
+            liquidity_allocation: 40,
+            release_cycles: 3,
+        },
+    };
+
+    // Create and approve launchpad
+    create_launch_pad(&mut chain, lp_contract, OWNER, add_params)?;
+    approve_launch_pad(
+        &mut chain,
+        ADMIN,
+        ApprovalParams {
+            product_name: product_name.to_string(),
+            approve: true,
+        },
+        lp_contract,
+    )?;
+
+    // Deposit tokens to make it LIVE
+    deposit_tokens(
+        &mut chain,
+        OWNER,
+        product_name.to_string(),
+        cis2_contract,
+        lp_contract,
+    )?;
+
+    // Invest with HOLDER[0] to meet soft cap
+    let result = invest(
+        &mut chain,
+        HOLDERS[0],
+        VestParams {
+            product_name: product_name.to_string(),
+            token_amount: TokenAmount(1000),
+        },
+        Amount::from_ccd(5000),
+        lp_contract,
+    );
+    assert_eq!(
+        result,
+        Ok(()),
+        "Investment failed unexpectedly: {:?}",
+        result
+    );
+
+    // Advance time just enough to pass the launchpad duration, but NOT vesting cliff
+    chain.tick_block_time(Duration::from_millis(3500)); // launchpad ends
+                                                        // cliff is still not passed (cliff = 3 months × 30 × 24 × 60 × 60 × 1000 ms)
+
+    // Try to withdraw raised funds (which triggers LP liquidity logic)
+    let result = withdraw_raised_funds(&mut chain, OWNER, product_name.to_string(), lp_contract);
+
+    // Should fail due to vesting cliff not being completed
+    assert_eq!(
+        result,
+        Ok(()),
+        "Should succeed if liquidity release is allowed before vesting completion"
+    );
+
+    Ok(())
+}

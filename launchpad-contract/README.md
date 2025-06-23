@@ -42,3 +42,8 @@ All of the availble unit tests are found here [Tests](./src/tests)
 
 
 **Note:** This contract might fail for the following [reasons](./src/error.rs) listed as the errors.
+
+
+## Deployment on testnet
+
+concordium-client module deploy ./concordium-out/module.wasm.v1 --sender 34oSdJvrnPJ5gQbgtAsynhivbuTERwgp437GAw4Yc3HiakkktS --name LaunchPad --grpc-ip node.testnet.concordium.com --grpc-port 20000
