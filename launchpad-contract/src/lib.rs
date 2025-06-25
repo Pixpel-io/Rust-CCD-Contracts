@@ -556,7 +556,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
     );
 
     // Owner can only withdraw collected funds if and only if
-    // the product has acheived soft cap and the funds are not
+    // the product has achieved soft cap and the funds are not
     // already raised
     if !launch_pad.withdrawn && launch_pad.reached_soft_cap() {
         ensure!(launch_pad.reached_soft_cap(), Error::SoftCap);
@@ -574,6 +574,11 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // price of the token in ccd and the amount of CCD being locked.
         let tokens_for_lp = ccd_lp_alloc.micro_ccd / launch_pad.product_base_price().micro_ccd;
 
+        // Calculate minimum amounts for 10% slippage tolerance
+        // *** NEW: Added to enforce 10% slippage tolerance by accepting at least 90% of expected amounts
+        let min_tokens_for_lp = TokenAmount((tokens_for_lp * 90) / 100); // 90% of tokens_for_lp
+        let min_ccd_lp_alloc = Amount::from_micro_ccd((ccd_lp_alloc.micro_ccd * 90) / 100); // 90% of ccd_lp_alloc
+
         // Remaining amount in CCD that can be withdrawn after the liquidity
         // allocation
         let withdrawable = launch_pad.collected - ccd_lp_alloc;
@@ -589,7 +594,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // Making DEX as an operator of Launch pad in CIS2 contract
         update_operator_of(host, cis2_contract, dex_contract.into())?;
 
-        // Ensure that DEX has been added as the oprators
+        // Ensure that DEX has been added as the operator
         let response = Cis2Client::new(cis2_contract).operator_of(
             host,
             ctx.self_address().into(),
@@ -597,16 +602,8 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         )?;
         ensure!(response, Error::JobFailed);
 
-        // Adding the liquidity to the Platform's DEX and invoking
-        DexClient::new(dex_contract).add_liquidity(
-            host,
-            token_id,
-            tokens_for_lp.into(),
-            ccd_lp_alloc,
-            cis2_contract,
-        )?;
-
-        let exchange = DexClient::new(dex_contract).get_exchange(
+        // *** NEW: Check the liquidity pool state before adding liquidity to establish a baseline
+        let pre_exchange = DexClient::new(dex_contract).get_exchange(
             host,
             &GetExchangeParams {
                 holder: Address::Contract(ctx.self_address()),
@@ -617,12 +614,43 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
             },
         )?;
 
+        // Adding the liquidity to the Platform's DEX and invoking
+        DexClient::new(dex_contract).add_liquidity(
+            host,
+            token_id,
+            tokens_for_lp.into(),
+            ccd_lp_alloc,
+            cis2_contract,
+        )?;
+
+        // *** NEW: Verify the liquidity added meets the 10% slippage tolerance
+        let post_exchange = DexClient::new(dex_contract).get_exchange(
+            host,
+            &GetExchangeParams {
+                holder: Address::Contract(ctx.self_address()),
+                token: TokenInfo {
+                    id: TokenIdVec(token_id.0.to_ne_bytes().into()),
+                    address: cis2_contract,
+                },
+            },
+        )?;
+
+        // *** NEW: Ensure the added token and CCD amounts are within 10% of expected
+        ensure!(
+            post_exchange.token_balance >= min_tokens_for_lp,
+            Error::Insufficient
+        );
+        ensure!(
+            post_exchange.ccd_balance >= TokenAmount(min_ccd_lp_alloc.micro_ccd),
+            Error::Insufficient
+        );
+
         // Platform will charge a certain amount from allocated liquidity
         // in exchange of DEX services it provides to the product.
         // Amount that is charged will be according to the launch pad policies
-        // and it will be charge from the received LPTokens.
+        // and it will be charged from the received LPTokens.
         let platform_lp_share =
-            (exchange.lp_tokens_supply * host.state().admin_liquidity_share()).0 / 100;
+            (post_exchange.lp_tokens_supply * host.state().admin_liquidity_share()).0 / 100;
 
         // Calculating the remaining LPTokens after platform's cut from the
         // received LPTokens.
@@ -633,13 +661,13 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
         // This is all aligned with the platform's policies to prevent rug-pull
         // as much as possible.
         let lp_allocated: TokenAmount =
-            ((exchange.lp_tokens_supply.0 - platform_lp_share) / 2).into();
+            ((post_exchange.lp_tokens_supply.0 - platform_lp_share) / 2).into();
 
         // Transfering the DEX service charges to the platform as the LPTokens.
         DexClient::new(host.state().dex_address()).transfer(
             host,
             TransferParams::<TokenIdU64, TokenAmount>(vec![Transfer {
-                token_id: exchange.lp_token_id,
+                token_id: post_exchange.lp_token_id,
                 amount: platform_lp_share.into(),
                 from: ctx.self_address().into(),
                 to: concordium_cis2::Receiver::Account(host.state().admin_address()),
@@ -696,7 +724,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
                 holder_info.insert_locked_cycle(
                     cycle_count as u8,
                     lpt_amount,
-                    exchange.lp_token_id,
+                    post_exchange.lp_token_id,
                     timestamp,
                 );
             }
@@ -718,7 +746,7 @@ fn withdraw_raised(ctx: &ReceiveContext, host: &mut Host<State>) -> ContractResu
                 cycle_count as u8,
                 (
                     lp_amount,
-                    exchange.lp_token_id,
+                    post_exchange.lp_token_id,
                     ((ctx.metadata().block_time().millis + CYCLE_DURATION * 4) * cycle_count)
                         .into(),
                     false,

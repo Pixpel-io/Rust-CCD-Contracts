@@ -18,10 +18,15 @@ const TRANSFER_ENTRYPOINT_NAME: EntrypointName = EntrypointName::new_unchecked("
 
 /// Defines the parameters to be passed required for adding liquidity
 /// in DEX.
+/// Defines the parameters to be passed required for adding liquidity
+/// in DEX.
 #[derive(Serial, Deserial, SchemaType)]
 pub struct AddLiquidityParams {
     pub token: TokenInfo,
     pub token_amount: TokenAmount,
+    // Add fields for slippage tolerance
+    pub min_token_amount: TokenAmount, // Minimum token amount to accept (90% of token_amount)
+    pub min_ccd_amount: Amount,        // Minimum CCD amount to accept (90% of amount)
 }
 
 /// Contains the information regarding tokens, to be added and locked
@@ -116,6 +121,10 @@ impl DexClient {
         amount: Amount,
         cis2_contract: ContractAddress,
     ) -> Result<(), Error> {
+        // Calculate minimum amounts with 10% slippage tolerance
+        let min_token_amount = TokenAmount(token_amount.0 * 90 / 100); // 90% of token_amount
+        let min_ccd_amount = Amount::from_micro_ccd(amount.micro_ccd * 90 / 100); // 90% of amount
+
         self.invoke_contract::<_, ()>(
             host,
             &AddLiquidityParams {
@@ -124,6 +133,8 @@ impl DexClient {
                     address: cis2_contract,
                 },
                 token_amount,
+                min_token_amount, // Pass minimum token amount
+                min_ccd_amount,   // Pass minimum CCD amount
             },
             ADD_LIQUIDITY_ENTRYPOINT_NAME,
             amount,
