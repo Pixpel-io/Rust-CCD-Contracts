@@ -1,19 +1,22 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+
 use concordium_cis2::{
-    AdditionalData, Cis2Client, OnReceivingCis2Params, TokenAmountU64 as TokenAmount, TokenIdU64,
-    TokenIdU8 as TokenID, TokenIdVec, Transfer, TransferParams,
+    AdditionalData, Cis2Client, OnReceivingCis2Params, Receiver, TokenAmountU64 as TokenAmount,
+    TokenIdU64, TokenIdU8 as TokenID, TokenIdVec, Transfer, TransferParams,
+    TransferParams as TransferParamsU64,
 };
 use concordium_std::{
     bail, ensure, init, receive, Address, Amount, DeserialWithState, Entry, ExternContext,
     ExternReceiveContext, ExternReturnValue, ExternStateApi, Get, HasChainMetadata, HasCommonData,
     HasHost, HasInitContext, HasLogger, HasReceiveContext, HasStateApi, HasStateEntry, Host,
-    InitContext, InitResult, Logger, ReceiveContext, Reject, Serial, StateBuilder, UnwrapAbort,
-    Write, *,
+    InitContext, InitResult, Logger, OwnedEntrypointName, ReceiveContext, Reject, Serial,
+    StateBuilder, UnwrapAbort, Write, *,
 };
 use dex::{DexClient, GetExchangeParams, TokenInfo};
 use errors::Error;
 use events::{ApproveEvent, CreateLaunchPadEvent, Event, RejectEvent, VestEvent};
 use helper::update_operator_of;
+
 use params::{
     ApprovalParams, ClaimLockedParams, ClaimUnLockedParams, Claimer, CreateParams, InitParams,
     LivePauseParams, VestParams,
@@ -79,7 +82,6 @@ fn init(ctx: &InitContext, state_builder: &mut StateBuilder) -> InitResult<State
         counter: 0,
     })
 }
-
 #[receive(
     contract = "LaunchPad",
     name = "CreateLaunchPad",
@@ -127,10 +129,49 @@ fn create_launchpad(
 
     // Creating the Launch-pad from user defined params and
     // getting the launch-pad ID
-    let (name, launch_pad) = LaunchPad::from_create_params(params, &mut host.state_builder);
+    let (name, mut launch_pad) =
+        LaunchPad::from_create_params(params.clone(), &mut host.state_builder);
+
+    // Store necessary information for token deposit
+    let product_owner = match ctx.sender() {
+        Address::Account(acc) => acc,
+        Address::Contract(_) => bail!(Error::OnlyAccount),
+    };
+
+    // Verify that the caller is the product owner
+    ensure!(
+        product_owner == launch_pad.get_product_owner(),
+        Error::UnAuthorized
+    );
+
+    // Get CIS2 contract and token details from the launchpad
+    let cis2_contract = launch_pad.get_cis2_contract();
+    let token_id = launch_pad.get_product_token_id();
+    let expected_token_amount = launch_pad.get_product_token_amount();
+
+    // Request token transfer from the product owner to the contract
+    // The owner needs to have approved the contract to transfer tokens beforehand
+    let cis2_client = Cis2Client::new(cis2_contract);
+
+    cis2_client.transfer(
+        host,
+        Transfer {
+            token_id,
+            amount: expected_token_amount,
+            from: Address::Account(product_owner),
+            to: Receiver::Contract(
+                ctx.self_address(),
+                OwnedEntrypointName::new_unchecked("onReceivingCIS2".into()),
+            ),
+            data: AdditionalData::empty(),
+        },
+    )?;
+
+    // Set the launch pad status to LIVE after successful token deposit
+    launch_pad.status = Status::INREVIEW;
 
     // Updating the contract State with new launchpad entry
-    match host.state_mut().launchpads.entry(name) {
+    match host.state_mut().launchpads.entry(name.clone()) {
         // If the launch-pad with the same product name exists
         // it will not allow the launch-pad to be inserted
         Entry::Occupied(_) => {
@@ -146,6 +187,14 @@ fn create_launchpad(
                 base_price: launch_pad.product_base_price(),
             }))?;
 
+            // Dispatching the event as notification when the vesting starts
+            // as soon as the allocated tokens are deposited
+            logger.log(&Event::VESTINGSTARTED(VestEvent {
+                launchpad_name: launch_pad.product_name(),
+                vesting_time: launch_pad.timeperiod,
+                vesting_limits: launch_pad.vest_limits.clone(),
+            }))?;
+
             entry.insert(launch_pad);
         }
     };
@@ -155,7 +204,6 @@ fn create_launchpad(
 
     Ok(())
 }
-
 #[receive(
     contract = "LaunchPad",
     name = "ApproveLaunchPad",
@@ -218,90 +266,23 @@ fn approve_launchpad(
 
     Ok(())
 }
+// #[derive(Serial, Deserial, SchemaType)]
+// struct DepositParams;
 
-#[receive(
-    contract = "LaunchPad",
-    name = "Deposit",
-    mutable,
-    parameter = "OnReceivingCis2Params<TokenID, TokenAmount>",
-    error = "Error",
-    enable_logger
-)]
-fn deposit_tokens(
-    ctx: &ReceiveContext,
-    host: &mut Host<State>,
-    logger: &mut Logger,
-) -> ContractResult<()> {
-    // This entry point is only meant to be invoked by CIS2 contract
-    // given by the product owner in launch-pad params
-    let contract = match ctx.sender() {
-        Address::Account(_) => bail!(Error::OnlyContract),
-        Address::Contract(cis2_contract) => cis2_contract,
-    };
-
-    // Parsing the parameters caught by OnReceive hook,
-    // We expect to receive additional data as the product
-    // name string type in the params
-    let OnReceiveCIS2Params {
-        token_id,
-        amount,
-        from,
-        data,
-    } = ctx.parameter_cursor().get()?;
-
-    let product_name = String::from_utf8(data.as_ref().to_owned()).unwrap();
-
-    // Fetching the launch-pad from the state if the correct
-    // product name is supplied
-    let mut launch_pad = host.state_mut().get_mut_launchpad(product_name)?;
-
-    // Making sure that the deposit is made by the product
-    // owner
-    ensure!(
-        from == Address::Account(launch_pad.get_product_owner()),
-        Error::UnAuthorized
-    );
-
-    // Ensure that the correct CIS2 contract invoked the
-    // deposit entry point using OnReceive hook
-    ensure!(
-        contract == launch_pad.get_cis2_contract(),
-        Error::UnAuthorized
-    );
-
-    println!(
-        "Amount: {:?}, Expected: {:?}",
-        amount,
-        launch_pad.get_product_token_amount()
-    );
-
-    // Ensure other details, such as the correct token amount
-    // is received or we have received the correct tokens by
-    // matching the token ID given in launch-pad params
-    ensure!(
-        amount == launch_pad.get_product_token_amount(),
-        Error::InCorrect
-    );
-    ensure!(
-        token_id == launch_pad.get_product_token_id(),
-        Error::InCorrect
-    );
-
-    // If every claim is valid, Launch-pad is made LIVE for presale
-    // for the current product
-    launch_pad.status = Status::LIVE;
-
-    // Dispatching the event as notification when the vesting start
-    // as soon as the allocated tokens are deposited
-    logger.log(&Event::VESTINGSTARTED(VestEvent {
-        launchpad_name: launch_pad.product_name(),
-        vesting_time: launch_pad.timeperiod,
-        vesting_limits: launch_pad.vest_limits.clone(),
-    }))?;
-
-    Ok(())
-}
-
+// #[receive(
+//     contract = "LaunchPad",
+//     name = "Deposit",
+//     parameter = "DepositParams",
+//     enable_logger
+// )]
+// fn deposit(
+//     ctx: &impl HasReceiveContext,
+//     host: &Host<State>,
+//     logger: &mut Logger,
+// ) -> ContractResult<()> {
+//     // Optional: Log or do something with the deposit
+//     Ok(())
+// }
 #[receive(
     contract = "LaunchPad",
     name = "LivePause",
@@ -945,7 +926,10 @@ fn view_all_launch_pads(_: &ReceiveContext, host: &Host<State>) -> ContractResul
     return_value = "LaunchPadView",
     error = "Error"
 )]
-fn view_launch_pad(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<LaunchPadView> {
+fn view_launch_pad(
+    ctx: &impl HasReceiveContext,
+    host: &Host<State>,
+) -> ContractResult<LaunchPadView> {
     let product_name: ProductName = ctx.parameter_cursor().get()?;
     let inner_state = host.state().get_launchpad(product_name)?;
 
@@ -958,7 +942,10 @@ fn view_launch_pad(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<L
     return_value = "LaunchPadsView",
     error = "Error"
 )]
-fn view_my_launch_pads(ctx: &ReceiveContext, host: &Host<State>) -> ContractResult<LaunchPadsView> {
+fn view_my_launch_pads(
+    ctx: &impl HasReceiveContext,
+    host: &Host<State>,
+) -> ContractResult<LaunchPadsView> {
     let holder = match ctx.sender() {
         Address::Account(acc) => acc,
         Address::Contract(_) => bail!(Error::OnlyAccount),
@@ -972,4 +959,20 @@ fn view_my_launch_pads(ctx: &ReceiveContext, host: &Host<State>) -> ContractResu
         .iter()
         .map(|id| host.state().get_launchpad(id.clone()).unwrap().into())
         .collect())
+}
+
+#[receive(
+    contract = "LaunchPad",
+    name = "onReceivingCIS2",
+    parameter = "concordium_cis2::OnReceivingCis2Params<concordium_cis2::TokenIdU64, concordium_std::Address>",
+    error = "Error",
+    mutable
+)]
+fn on_receiving_cis2(ctx: &impl HasReceiveContext, _host: &mut Host<State>) -> ContractResult<()> {
+    let params: OnReceivingCis2Params<TokenIdU64, Address> = ctx.parameter_cursor().get()?;
+
+    // Optional: Validate params here
+    // e.g., ensure!(params.amount > Amount::zero(), Error::InCorrect);
+
+    Ok(())
 }

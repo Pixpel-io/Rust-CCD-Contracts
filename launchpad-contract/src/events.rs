@@ -24,6 +24,8 @@ pub enum Event {
     /// Event to be logged when a launch pad finishes vesting and
     /// enters the cliff period
     CLIFFSTARTED(CliffEvent),
+
+    LOG(String),
 }
 
 // Implementing a custom schemaType for the `Event` struct.

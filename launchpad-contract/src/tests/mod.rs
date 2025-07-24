@@ -428,8 +428,9 @@ fn invest(
         "LaunchPad.Vest",
     )
 }
-/// A helper function which invokes `cis2 transfer`, which in turns invokes the
-/// "Deposit" method in launch pad.
+// }
+// / A helper function which invokes `cis2 transfer`, which in turns invokes the
+// / "Deposit" method in launch pad.
 
 fn deposit_tokens(
     chain: &mut Chain,

@@ -139,6 +139,10 @@ pub enum Error {
     ///
     /// Code -24
     DEX(i32),
+    /// Raised when a transfer fails in the CIS2 contract.
+    ///
+    /// Code -25
+    Cis2TransferFailed,
 }
 
 // Mapping error received while transfering amount `(TransferError)`

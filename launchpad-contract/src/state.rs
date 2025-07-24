@@ -396,7 +396,7 @@ pub struct Product {
 
 #[derive(Serialize, SchemaType, Clone, Debug, PartialEq)]
 pub enum Status {
-    /// When launchpas is approved and published for investments
+    /// When launchpad is approved and published for investments
     LIVE,
     /// When the launchpad is paused and not accepting investment
     PAUSED,
