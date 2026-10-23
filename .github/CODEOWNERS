@@ -1,0 +1,4 @@
+*.config.*       @irausquin51-art
+package.json     @irausquin51-art
+package-lock.json @irausquin51-art
+.github/         @irausquin51-art
